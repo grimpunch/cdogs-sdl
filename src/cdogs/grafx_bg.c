@@ -34,6 +34,7 @@
 #include "game_events.h"
 #include "handle_game_events.h"
 #include "log.h"
+#include "map_build.h"
 #include "objs.h"
 #include "pickup.h"
 #include "quick_play.h"
@@ -60,15 +61,33 @@ void GrafxMakeRandomBackground(
 	CampaignSettingTerminate(&co->Setting);
 }
 
-static void DrawBackground(
-	GraphicsDevice *g, SDL_Texture *tTgt, SDL_Texture *t, DrawBuffer *buffer,
-	Map *map, const HSV tint, const struct vec2 pos, GrafxDrawExtra *extra);
+static void DrawBackgroundWithRenderer(
+	GraphicsDevice *g, SDL_Renderer *renderer, SDL_Texture *target,
+	SDL_Texture *src, DrawBuffer *buffer,
+	const HSV tint, const struct vec2 pos, GrafxDrawExtra *extra);
 void GrafxDrawBackground(
 	GraphicsDevice *g, DrawBuffer *buffer,
 	const HSV tint, const struct vec2 pos, GrafxDrawExtra *extra)
 {
+	DrawBackgroundWithRenderer(
+		g, g->gameWindow.renderer, g->bkgTgt, g->bkg, buffer, tint, pos, extra);
+	if (g->cachedConfig.SecondWindow)
+	{
+		DrawBackgroundWithRenderer(
+			g, g->secondWindow.renderer, g->bkgTgt2, g->bkg2, buffer, tint, pos,
+			extra);
+	}
+}
+static void DrawBackground(
+	GraphicsDevice *g, SDL_Texture *tTgt, SDL_Texture *t, DrawBuffer *buffer,
+	Map *map, const HSV tint, const struct vec2 pos, GrafxDrawExtra *extra);
+static void DrawBackgroundWithRenderer(
+	GraphicsDevice *g, SDL_Renderer *renderer, SDL_Texture *target,
+	SDL_Texture *src, DrawBuffer *buffer,
+	const HSV tint, const struct vec2 pos, GrafxDrawExtra *extra)
+{
 	SDL_RendererInfo ri;
-	if (SDL_GetRendererInfo(g->gameWindow.renderer, &ri) != 0)
+	if (SDL_GetRendererInfo(renderer, &ri) != 0)
 	{
 		LOG(LM_GFX, LL_ERROR, "cannot set render target: %s", SDL_GetError());
 	}
@@ -80,34 +99,12 @@ void GrafxDrawBackground(
 				"renderer does not support render to texture");
 		}
 	}
-	if (SDL_SetRenderTarget(g->gameWindow.renderer, g->bkgTgt) != 0)
+	if (SDL_SetRenderTarget(renderer, target) != 0)
 	{
 		LOG(LM_GFX, LL_ERROR, "cannot set render target: %s", SDL_GetError());
 	}
-	if (g->cachedConfig.SecondWindow)
-	{
-		if (SDL_SetRenderTarget(g->secondWindow.renderer, g->bkgTgt2) != 0)
-		{
-			LOG(LM_GFX, LL_ERROR, "cannot set render target: %s",
-				SDL_GetError());
-		}
-		DrawBackground(
-			g, g->bkgTgt, g->bkg, buffer, &gMap, tint,
-			svec2(pos.x - g->cachedConfig.Res.x / 2, pos.y), extra);
-		DrawBackground(
-			g, g->bkgTgt2, g->bkg2, buffer, &gMap, tint,
-			svec2(pos.x + g->cachedConfig.Res.x / 2, pos.y), extra);
-		if (SDL_SetRenderTarget(g->secondWindow.renderer, NULL) != 0)
-		{
-			LOG(LM_GFX, LL_ERROR, "cannot set render target: %s",
-				SDL_GetError());
-		}
-	}
-	else
-	{
-		DrawBackground(g, g->bkgTgt, g->bkg, buffer, &gMap, tint, pos, extra);
-	}
-	if (SDL_SetRenderTarget(g->gameWindow.renderer, NULL) != 0)
+	DrawBackground(g, target, src, buffer, &gMap, tint, pos, extra);
+	if (SDL_SetRenderTarget(renderer, NULL) != 0)
 	{
 		LOG(LM_GFX, LL_ERROR, "cannot set render target: %s", SDL_GetError());
 	}
@@ -116,6 +113,7 @@ static void DrawBackground(
 	GraphicsDevice *g, SDL_Texture *tTgt, SDL_Texture *t, DrawBuffer *buffer,
 	Map *map, const HSV tint, const struct vec2 pos, GrafxDrawExtra *extra)
 {
+	BlitClearBuf(g);
 	DrawBufferSetFromMap(buffer, map, pos, X_TILES);
 	DrawBufferDraw(buffer, svec2i_zero(), extra);
 	BlitUpdateFromBuf(g, t);
@@ -152,8 +150,7 @@ void GrafxMakeBackground(
 {
 	CampaignAndMissionSetup(co, mo);
 	GameEventsInit(&gGameEvents);
-	MapLoad(map, mo, co);
-	MapLoadDynamic(map, mo, &co->Setting.characters);
+	MapBuild(map, mo->missionData, co);
 	InitializeBadGuys();
 	CreateEnemies();
 	MapMarkAllAsVisited(map);

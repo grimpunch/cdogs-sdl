@@ -449,7 +449,7 @@ static void MissionDrawDoorStyle(
 	DrawStyleArea(
 		svec2i_add(pos, o->Pos),
 		"Doors",
-		&GetDoorPic(&gPicManager, m->DoorStyle, "normal", true)->pic,
+		DoorGetClass(m->DoorStyle, "normal", true)->Pic,
 		idx, (int)gPicManager.doorStyleNames.size,
 		UIObjectIsHighlighted(o));
 }
@@ -464,10 +464,11 @@ static void MissionDrawKeyStyle(
 		return;
 	}
 	const int idx = PicManagerGetKeyStyleIndex(&gPicManager, m->KeyStyle);
+	const Pic *pic = CPicGetPic(&KeyPickupClass(m->KeyStyle, 0)->Pic, 0);
 	DrawStyleArea(
 		svec2i_add(pos, o->Pos),
 		"Keys",
-		KeyPickupClass(m->KeyStyle, 0)->Pic,
+		pic,
 		idx, (int)gPicManager.keyStyleNames.size,
 		UIObjectIsHighlighted(o));
 }
@@ -485,7 +486,7 @@ static void MissionDrawExitStyle(
 	DrawStyleArea(
 		svec2i_add(pos, o->Pos),
 		"Exit",
-		&PicManagerGetExitPic(&gPicManager, m->ExitStyle, false)->pic,
+		TileClassesGetExit(&gTileClasses, &gPicManager, m->ExitStyle, false)->Pic,
 		idx, (int)gPicManager.exitStyleNames.size,
 		UIObjectIsHighlighted(o));
 }
@@ -573,7 +574,7 @@ static void MissionDrawEnemy(
 	DrawCharacterSimple(
 		CArrayGet(&store->OtherChars, charIndex),
 		svec2i_add(svec2i_add(pos, o->Pos), svec2i_scale_divide(o->Size, 2)),
-		DIRECTION_DOWN, UIObjectIsHighlighted(o), true);
+		DIRECTION_DOWN, UIObjectIsHighlighted(o), true, true);
 }
 static void MissionDrawSpecialChar(
 	UIObject *o, GraphicsDevice *g, struct vec2i pos, void *vData)
@@ -591,7 +592,7 @@ static void MissionDrawSpecialChar(
 	DrawCharacterSimple(
 		CArrayGet(&store->OtherChars, charIndex),
 		svec2i_add(svec2i_add(pos, o->Pos), svec2i_scale_divide(o->Size, 2)),
-		DIRECTION_DOWN, UIObjectIsHighlighted(o), true);
+		DIRECTION_DOWN, UIObjectIsHighlighted(o), true, true);
 }
 static void MissionDrawMapItem(
 	UIObject *o, GraphicsDevice *g, struct vec2i pos, void *vData)
@@ -827,12 +828,12 @@ static void MissionChangeType(void *data, int d)
 		return;
 	}
 	Map map;
+	memset(&map, 0, sizeof map);
 	MissionOptionsTerminate(&gMission);
 	CampaignAndMissionSetup(mct->C, &gMission);
-	memset(&map, 0, sizeof map);
-	MapLoad(&map, &gMission, mct->C);
-	MapLoadDynamic(&map, &gMission, &mct->C->Setting.characters);
+	MapBuild(&map, gMission.missionData, mct->C);
 	MissionConvertToType(gMission.missionData, &map, mct->Type);
+	MapTerminate(&map);
 }
 static void MissionChangeWallStyle(void *data, int d)
 {
@@ -902,12 +903,15 @@ static void MissionChangeExitStyle(void *data, int d)
 static void MissionChangeEnemy(void *vData, int d)
 {
 	MissionIndexData *data = vData;
-	int enemy = *(int *)CArrayGet(
-		&CampaignGetCurrentMission(data->co)->Enemies, data->index);
+	CArray *enemies = &CampaignGetCurrentMission(data->co)->Enemies;
+	if (data->index >= (int)enemies->size)
+	{
+		return;
+	}
+	int enemy = *(int *)CArrayGet(enemies, data->index);
 	enemy = CLAMP_OPPOSITE(
 		enemy + d, 0, (int)data->co->Setting.characters.OtherChars.size - 1);
-	*(int *)CArrayGet(
-		&CampaignGetCurrentMission(data->co)->Enemies, data->index) = enemy;
+	*(int *)CArrayGet(enemies, data->index) = enemy;
 	*(int *)CArrayGet(
 		&data->co->Setting.characters.baddieIds, data->index) = enemy;
 }
@@ -1640,7 +1644,7 @@ static void DrawMapItem(
 	if (data->M->Type == MAP_OBJECT_TYPE_PICKUP_SPAWNER)
 	{
 		// Also draw the pickup object spawned by this spawner
-		const Pic *pic = data->M->u.PickupClass->Pic;
+		const Pic *pic = CPicGetPic(&data->M->u.PickupClass->Pic, 0);
 		pos = svec2i_subtract(pos, svec2i_scale_divide(pic->size, 2));
 		Blit(
 			g, pic,

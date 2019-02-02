@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2014-2017 Cong Xu
+    Copyright (c) 2014-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -27,6 +27,7 @@
 */
 #include "particle.h"
 
+#include "campaigns.h"
 #include "collision/collision.h"
 #include "font.h"
 #include "game_events.h"
@@ -39,6 +40,9 @@ ParticleClasses gParticleClasses;
 CArray gParticles;
 
 #define VERSION 2
+
+// Particles get darker when below this height
+#define PARTICLE_DARKEN_Z BULLET_Z
 
 
 ParticleType StrParticleType(const char *s)
@@ -204,6 +208,7 @@ static void LoadParticleClass(
 	LoadBool(&c->Bounces, node, "Bounces");
 	c->WallBounces = true;
 	LoadBool(&c->WallBounces, node, "WallBounces");
+	LoadBool(&c->ZDarken, node, "ZDarken");
 }
 
 const ParticleClass *StrParticleClass(
@@ -269,7 +274,7 @@ void ParticlesUpdate(CArray *particles, const int ticks)
 
 typedef struct
 {
-	const TTileItem *Obj;
+	const Thing *Obj;
 	struct vec2 ColPos;
 	struct vec2 ColNormal;
 	float ColPosDist2;
@@ -292,7 +297,7 @@ static bool ParticleUpdate(Particle *p, const int ticks)
 	const struct vec2 startPos = p->Pos;
 	for (int i = 0; i < ticks; i++)
 	{
-		p->Pos = svec2_add(p->Pos, p->tileItem.Vel);
+		p->Pos = svec2_add(p->Pos, p->thing.Vel);
 		p->Z += p->DZ;
 		if (p->Class->GravityFactor != 0)
 		{
@@ -314,40 +319,40 @@ static bool ParticleUpdate(Particle *p, const int ticks)
 			}
 			if (p->DZ == 0 && p->Z == 0)
 			{
-				p->tileItem.Vel = svec2_zero();
+				p->thing.Vel = svec2_zero();
 				p->Spin = 0;
 				// Fell to ground, draw last
-				p->tileItem.flags |= TILEITEM_DRAW_LAST;
+				p->thing.flags |= THING_DRAW_LAST;
 			}
 		}
 	}
 	// Wall collision, bounce off walls
-	if (!svec2_is_zero(p->tileItem.Vel) && p->Class->HitsWalls)
+	if (!svec2_is_zero(p->thing.Vel) && p->Class->HitsWalls)
 	{
 		const CollisionParams params =
 		{
 			0, COLLISIONTEAM_NONE, IsPVP(gCampaign.Entry.Mode)
 		};
-		HitWallData data = { &p->tileItem, svec2_zero(), svec2_zero(), -1 };
-		OverlapTileItems(
-			&p->tileItem, startPos,
-			p->tileItem.size, params, NULL, NULL,
+		HitWallData data = { &p->thing, svec2_zero(), svec2_zero(), -1 };
+		OverlapThings(
+			&p->thing, startPos,
+			p->thing.size, params, NULL, NULL,
 			CheckWall, HitWallFunc, &data);
 		if (data.ColPosDist2 >= 0)
 		{
 			if (p->Class->WallBounces)
 			{
 				GetWallBouncePosVel(
-					startPos, p->tileItem.Vel, data.ColPos, data.ColNormal,
-					&p->Pos, &p->tileItem.Vel);
+					startPos, p->thing.Vel, data.ColPos, data.ColNormal,
+					&p->Pos, &p->thing.Vel);
 			}
 			else
 			{
-				p->tileItem.Vel = svec2_zero();
+				p->thing.Vel = svec2_zero();
 			}
 		}
-	}\
-	if (!MapTryMoveTileItem(&gMap, &p->tileItem, p->Pos))
+	}
+	if (!MapTryMoveThing(&gMap, &p->thing, p->Pos))
 	{
 		// Out of map; destroy
 		return false;
@@ -355,13 +360,13 @@ static bool ParticleUpdate(Particle *p, const int ticks)
 
 	// Spin
 	p->Angle += p->Spin;
-	if (p->Angle > 2 * M_PI)
+	if (p->Angle > 2 * MPI)
 	{
-		p->Angle -= M_PI * 2;
+		p->Angle -= 2 * MPI;
 	}
 	if (p->Angle < 0)
 	{
-		p->Angle += M_PI * 2;
+		p->Angle += 2 * MPI;
 	}
 
 	return p->Count <= p->Range;
@@ -371,7 +376,7 @@ static void SetClosestCollision(
 static bool CheckWall(const struct vec2i tilePos)
 {
 	const Tile *t = MapGetTile(&gMap, tilePos);
-	return t == NULL || t->flags & MAPTILE_NO_SHOOT;
+	return t == NULL || TileIsShootable(t);
 }
 static bool HitWallFunc(
 	const struct vec2i tilePos, void *data, const struct vec2 col,
@@ -395,7 +400,7 @@ static void SetClosestCollision(
 	}
 }
 
-static void DrawParticle(const struct vec2i pos, const TileItemDrawFuncData *data);
+static void DrawParticle(const struct vec2i pos, const ThingDrawFuncData *data);
 int ParticleAdd(CArray *particles, const AddParticle add)
 {
 	// Find an empty slot in list
@@ -439,20 +444,22 @@ int ParticleAdd(CArray *particles, const AddParticle add)
 	p->Spin = add.Spin;
 	p->Range = RAND_INT(add.Class->RangeLow, add.Class->RangeHigh);
 	p->isInUse = true;
-	p->tileItem.Pos.x = p->tileItem.Pos.y = -1;
-	p->tileItem.Vel = add.Vel;
-	p->tileItem.kind = KIND_PARTICLE;
-	p->tileItem.id = i;
-	p->tileItem.drawFunc = DrawParticle;
-	p->tileItem.drawData.MobObjId = i;
-	MapTryMoveTileItem(&gMap, &p->tileItem, add.Pos);
+	p->thing.Pos.x = p->thing.Pos.y = -1;
+	p->thing.Vel = add.Vel;
+	p->thing.kind = KIND_PARTICLE;
+	p->thing.id = i;
+	p->thing.drawFunc = DrawParticle;
+	p->thing.drawData.MobObjId = i;
+	p->thing.drawData.Scale =
+		svec2_is_zero(add.DrawScale) ? svec2_one() : add.DrawScale;
+	MapTryMoveThing(&gMap, &p->thing, add.Pos);
 	return i;
 }
 void ParticleDestroy(CArray *particles, const int id)
 {
 	Particle *p = CArrayGet(particles, id);
 	CASSERT(p->isInUse, "Destroying not-in-use particle");
-	MapRemoveTileItem(&gMap, &p->tileItem);
+	MapRemoveThing(&gMap, &p->thing);
 	if (p->Class->Type == PARTICLE_TEXT)
 	{
 		CFREE(p->u.Text);
@@ -460,7 +467,7 @@ void ParticleDestroy(CArray *particles, const int id)
 	p->isInUse = false;
 }
 
-static void DrawParticle(const struct vec2i pos, const TileItemDrawFuncData *data)
+static void DrawParticle(const struct vec2i pos, const ThingDrawFuncData *data)
 {
 	const Particle *p = CArrayGet(&gParticles, data->MobObjId);
 	CASSERT(p->isInUse, "Cannot draw non-existent particle");
@@ -468,13 +475,25 @@ static void DrawParticle(const struct vec2i pos, const TileItemDrawFuncData *dat
 	{
 		case PARTICLE_PIC:
 		{
-			CPicDrawContext context;
-			context.Dir = RadiansToDirection(p->Angle);
-			const Pic *pic = CPicGetPic(&p->u.Pic, context.Dir);
-			context.Offset = svec2i(
+			CPicDrawContext c = CPicDrawContextNew();
+			c.Dir = RadiansToDirection(p->Angle);
+			const Pic *pic = CPicGetPic(&p->u.Pic, c.Dir);
+			if (p->u.Pic.Type != PICTYPE_DIRECTIONAL)
+			{
+				c.Radians = p->Angle;
+			}
+			c.Offset = svec2i(
 				pic->size.x / -2, pic->size.y / -2 - p->Z / Z_FACTOR);
-			CPicDraw(
-				&gGraphicsDevice, &p->Class->u.Pic, pos, &context);
+			c.Scale = data->Scale;
+			if (p->Class->ZDarken)
+			{
+				// Darken by 50% when on ground
+				const uint8_t maskF = (uint8_t)CLAMP(
+					p->Z * PARTICLE_DARKEN_Z * Z_FACTOR / 256 + 128, 128, 255);
+				const color_t mask = { maskF, maskF, maskF, 255 };
+				c.Mask = mask;
+			}
+			CPicDraw(&gGraphicsDevice, &p->u.Pic, pos, &c);
 			break;
 		}
 		case PARTICLE_TEXT:

@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2017, Cong Xu
+    Copyright (c) 2013-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -46,6 +46,9 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
+#define _BSD_SOURCE
+#define _DEFAULT_SOURCE
+
 #include "utils.h"
 
 #include <assert.h>
@@ -378,11 +381,7 @@ double Round(double x)
 
 double ToDegrees(double radians)
 {
-	return radians * 180.0 / M_PI;
-}
-double ToRadians(double degrees)
-{
-	return degrees * M_PI / 180.0;
+	return radians * 180.0 / MPI;
 }
 
 struct vec2 CalcClosestPointOnLineSegmentToPoint(
@@ -506,4 +505,15 @@ BodyPart StrBodyPart(const char *s)
 	S2T(BODY_PART_LEGS, "legs");
 	S2T(BODY_PART_GUN, "gun");
 	return BODY_PART_HEAD;
+}
+
+int Pulse256(const int t)
+{
+	const int pulsePeriod = ConfigGetInt(&gConfig, "Game.FPS");
+	int alphaUnscaled = (t % pulsePeriod) * 255 / (pulsePeriod / 2);
+	if (alphaUnscaled > 255)
+	{
+		alphaUnscaled = 255 * 2 - alphaUnscaled;
+	}
+	return alphaUnscaled;
 }

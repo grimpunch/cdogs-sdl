@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2018 Cong Xu
+    Copyright (c) 2013-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -62,12 +62,14 @@
 #include "character.h"
 #include "collision/collision.h"
 #include "config.h"
+#include "damage.h"
 #include "draw/drawtools.h"
 #include "events.h"
 #include "game_events.h"
 #include "log.h"
 #include "pic_manager.h"
 #include "sounds.h"
+#include "thing.h"
 #include "defs.h"
 #include "objs.h"
 #include "pickup.h"
@@ -78,6 +80,7 @@
 #include "utils.h"
 
 #define FOOTSTEP_DISTANCE_PLUS 250
+#define FOOTSTEP_MAX_ANIM_SPEED 2
 #define REPEL_STRENGTH 0.06f
 #define SLIDE_LOCK 50
 #define SLIDE_X (TILE_WIDTH / 3)
@@ -86,10 +89,11 @@
 #define VEL_DECAY_Y (TILE_WIDTH * 2 / 256.0f)	// Note: deliberately tile width
 #define SOUND_LOCK_WEAPON_CLICK 20
 #define DROP_GUN_CHANCE 0.2
-#define DRAW_RADIAN_SPEED (M_PI/16)
+#define DRAW_RADIAN_SPEED (MPI/16)
 // Percent of health considered low; bleed and flash HUD if low
 #define LOW_HEALTH_PERCENTAGE 25
 #define GORE_EMITTER_MAX_SPEED 0.25f
+#define CHATTER_SWITCH_GUN 45 // TODO: based on clock time instead of game ticks
 
 
 CArray gPlayerIds;
@@ -116,6 +120,9 @@ void UpdateActorState(TActor * actor, int ticks)
 	{
 		CheckPickups(actor);
 	}
+	// Stop picking up to prevent multiple pickups
+	// (require repeated key presses)
+	actor->PickupAll = false;
 
 	if (actor->health > 0)
 	{
@@ -134,7 +141,7 @@ void UpdateActorState(TActor * actor, int ticks)
 	
 	actor->slideLock = MAX(0, actor->slideLock - ticks);
 
-	TileItemUpdate(&actor->tileItem, ticks);
+	ThingUpdate(&actor->thing, ticks);
 
 	actor->stateCounter = MAX(0, actor->stateCounter - ticks);
 	if (actor->stateCounter > 0)
@@ -146,7 +153,7 @@ void UpdateActorState(TActor * actor, int ticks)
 		actor->dead++;
 		actor->MoveVel = svec2_zero();
 		actor->stateCounter = 4;
-		actor->tileItem.flags = 0;
+		actor->thing.flags = 0;
 		return;
 	}
 
@@ -180,12 +187,21 @@ void UpdateActorState(TActor * actor, int ticks)
 		actor->anim.newFrame)
 	{
 		SoundPlayAtPlusDistance(
-			&gSoundDevice, StrSound("footsteps"), actor->tileItem.Pos,
+			&gSoundDevice, StrSound("footsteps"), actor->thing.Pos,
 			FOOTSTEP_DISTANCE_PLUS);
 	}
 
 	// Animation
-	AnimationUpdate(&actor->anim, ticks);
+	float animTicks = 1;
+	if (actor->anim.Type == ACTORANIMATION_WALKING)
+	{
+		// Update walk animation based on actor speed
+		animTicks = MIN(
+			svec2_length(svec2_add(actor->MoveVel, actor->thing.Vel)),
+			FOOTSTEP_MAX_ANIM_SPEED);
+	}
+	animTicks *= ticks;
+	AnimationUpdate(&actor->anim, animTicks);
 
 	// Chatting
 	actor->ChatterCounter = MAX(0, actor->ChatterCounter - ticks);
@@ -218,7 +234,7 @@ bool TryMoveActor(TActor *actor, struct vec2 pos)
 	actor->CanPickupSpecial = false;
 
 	const struct vec2 oldPos = actor->Pos;
-	pos = GetConstrainedPos(&gMap, actor->Pos, pos, actor->tileItem.size);
+	pos = GetConstrainedPos(&gMap, actor->Pos, pos, actor->thing.size);
 	if (svec2_is_nearly_equal(oldPos, pos, EPSILON_POS))
 	{
 		return false;
@@ -232,11 +248,11 @@ bool TryMoveActor(TActor *actor, struct vec2 pos)
 	{
 		const CollisionParams params =
 		{
-			TILEITEM_IMPASSABLE, CalcCollisionTeam(true, actor),
+			THING_IMPASSABLE, CalcCollisionTeam(true, actor),
 			IsPVP(gCampaign.Entry.Mode)
 		};
-		TTileItem *target = OverlapGetFirstItem(
-			&actor->tileItem, pos, actor->tileItem.size, params);
+		Thing *target = OverlapGetFirstItem(
+			&actor->thing, pos, actor->thing.size, params);
 		if (target)
 		{
 			Weapon *gun = ACTOR_GET_WEAPON(actor);
@@ -285,13 +301,13 @@ bool TryMoveActor(TActor *actor, struct vec2 pos)
 
 			const struct vec2 yPos = svec2(actor->Pos.x, pos.y);
 			if (OverlapGetFirstItem(
-				&actor->tileItem, yPos, actor->tileItem.size, params))
+				&actor->thing, yPos, actor->thing.size, params))
 			{
 				pos.y = actor->Pos.y;
 			}
 			const struct vec2 xPos = svec2(pos.x, actor->Pos.y);
 			if (OverlapGetFirstItem(
-				&actor->tileItem, xPos, actor->tileItem.size, params))
+				&actor->thing, xPos, actor->thing.size, params))
 			{
 				pos.x = actor->Pos.x;
 			}
@@ -303,7 +319,7 @@ bool TryMoveActor(TActor *actor, struct vec2 pos)
 				pos.y = actor->Pos.y;
 			}
 			if ((pos.x == actor->Pos.x && pos.y == actor->Pos.y) ||
-				IsCollisionWithWall(pos, actor->tileItem.size))
+				IsCollisionWithWall(pos, actor->thing.size))
 			{
 				return false;
 			}
@@ -422,8 +438,8 @@ static void CheckTrigger(const struct vec2i tilePos, const bool showLocked);
 static void CheckRescue(const TActor *a);
 static void OnMove(TActor *a)
 {
-	MapTryMoveTileItem(&gMap, &a->tileItem, a->Pos);
-	if (MapIsTileInExit(&gMap, &a->tileItem))
+	MapTryMoveThing(&gMap, &a->thing, a->Pos);
+	if (MapIsTileInExit(&gMap, &a->thing))
 	{
 		a->action = ACTORACTION_EXITING;
 	}
@@ -463,7 +479,7 @@ static void CheckTrigger(const struct vec2i tilePos, const bool showLocked)
 }
 // Check if the player can pickup any item
 static bool CheckPickupFunc(
-	TTileItem *ti, void *data, const struct vec2 colA, const struct vec2 colB,
+	Thing *ti, void *data, const struct vec2 colA, const struct vec2 colB,
 	const struct vec2 normal);
 static void CheckPickups(TActor *actor)
 {
@@ -476,12 +492,12 @@ static void CheckPickups(TActor *actor)
 	{
 		0, CalcCollisionTeam(true, actor), IsPVP(gCampaign.Entry.Mode)
 	};
-	OverlapTileItems(
-		&actor->tileItem, actor->Pos, actor->tileItem.size,
+	OverlapThings(
+		&actor->thing, actor->Pos, actor->thing.size,
 		params, CheckPickupFunc, actor, NULL, NULL, NULL);
 }
 static bool CheckPickupFunc(
-	TTileItem *ti, void *data, const struct vec2 colA, const struct vec2 colB,
+	Thing *ti, void *data, const struct vec2 colA, const struct vec2 colB,
 	const struct vec2 normal)
 {
 	UNUSED(colA);
@@ -503,12 +519,12 @@ static void CheckRescue(const TActor *a)
 #define RESCUE_CHECK_PAD 2
 	const CollisionParams params =
 	{
-		TILEITEM_IMPASSABLE, CalcCollisionTeam(true, a),
+		THING_IMPASSABLE, CalcCollisionTeam(true, a),
 		IsPVP(gCampaign.Entry.Mode)
 	};
-	const TTileItem *target = OverlapGetFirstItem(
-		&a->tileItem, a->Pos,
-		svec2i_add(a->tileItem.size, svec2i(RESCUE_CHECK_PAD, RESCUE_CHECK_PAD)),
+	const Thing *target = OverlapGetFirstItem(
+		&a->thing, a->Pos,
+		svec2i_add(a->thing.size, svec2i(RESCUE_CHECK_PAD, RESCUE_CHECK_PAD)),
 		params);
 	if (target != NULL && target->kind == KIND_CHARACTER)
 	{
@@ -521,7 +537,7 @@ static void CheckRescue(const TActor *a)
 			e.u.Rescue.UID = other->uid;
 			GameEventsEnqueue(&gGameEvents, e);
 			UpdateMissionObjective(
-				&gMission, other->tileItem.flags, OBJECTIVE_RESCUE, 1);
+				&gMission, other->thing.flags, OBJECTIVE_RESCUE, 1);
 		}
 	}
 }
@@ -542,24 +558,24 @@ void InjureActor(TActor * actor, int injury)
 		SoundPlayAt(
 			&gSoundDevice,
 			StrSound(ActorGetCharacter(actor)->Class->Sounds.Aargh),
-			actor->tileItem.Pos);
+			actor->thing.Pos);
 		if (actor->PlayerUID >= 0)
 		{
 			SoundPlayAt(
 				&gSoundDevice,
 				StrSound("hahaha"),
-				actor->tileItem.Pos);
+				actor->thing.Pos);
 		}
-		if (actor->tileItem.flags & TILEITEM_OBJECTIVE)
+		if (actor->thing.flags & THING_OBJECTIVE)
 		{
 			UpdateMissionObjective(
-				&gMission, actor->tileItem.flags, OBJECTIVE_KILL, 1);
+				&gMission, actor->thing.flags, OBJECTIVE_KILL, 1);
 			// If we've killed someone we have rescued, deduct from the
 			// rescue objective
 			if (!(actor->flags & FLAGS_PRISONER))
 			{
 				UpdateMissionObjective(
-					&gMission, actor->tileItem.flags, OBJECTIVE_RESCUE, -1);
+					&gMission, actor->thing.flags, OBJECTIVE_RESCUE, -1);
 			}
 		}
 	}
@@ -663,16 +679,24 @@ int ActorGetNumGrenades(const TActor *a)
 	return count;
 }
 
+static void ActorSetChatter(TActor *a, const char *text, const int count)
+{
+	strcpy(a->Chatter, text);
+	a->ChatterCounter = count;
+}
+
 // Set AI state and possibly say something based on the state
 void ActorSetAIState(TActor *actor, const AIState s)
 {
-	if (AIContextSetState(actor->aiContext, s) &&
-		AIContextShowChatter(
-		actor->aiContext, ConfigGetEnum(&gConfig, "Interface.AIChatter")))
+	if (AIContextSetState(actor->aiContext, s))
 	{
-		// Say something for a while
-		strcpy(actor->Chatter, AIStateGetChatterText(actor->aiContext->State));
-		actor->ChatterCounter = 2;
+		ActorSetChatter(
+			actor,
+			AIStateGetChatterText(actor->aiContext->State),
+			AIContextShowChatter(
+				actor->aiContext,
+				ConfigGetEnum(&gConfig, "Interface.AIChatter"))
+		);
 	}
 }
 
@@ -782,49 +806,39 @@ void CommandActor(TActor * actor, int cmd, int ticks)
 		const bool hasShot = ActorTryShoot(actor, cmd);
 		const bool hasGrenaded = TryGrenade(actor, cmd);
 		const bool hasMoved = ActorTryMove(actor, cmd, hasShot, ticks);
+		ActorAnimation anim = actor->anim.Type;
 		// Idle if player hasn't done anything
-		if (!(hasChangedDirection || hasShot || hasGrenaded || hasMoved) &&
-			actor->anim.Type != ACTORANIMATION_IDLE)
+		if (!(hasChangedDirection || hasShot || hasGrenaded || hasMoved))
+		{
+			anim = ACTORANIMATION_IDLE;
+		}
+		else if (hasMoved)
+		{
+			anim = ACTORANIMATION_WALKING;
+		}
+		if (actor->anim.Type != anim)
 		{
 			GameEvent e = GameEventNew(GAME_EVENT_ACTOR_STATE);
 			e.u.ActorState.UID = actor->uid;
-			e.u.ActorState.State = (int32_t)ACTORANIMATION_IDLE;
+			e.u.ActorState.State = (int32_t)anim;
+			GameEventsEnqueue(&gGameEvents, e);
+		}
+	}
+
+	actor->specialCmdDir = CMD_HAS_DIRECTION(cmd);
+	if ((cmd & CMD_BUTTON2) && !actor->specialCmdDir)
+	{
+		// Special: pick up things that can only be picked up on demand
+		if (!actor->PickupAll && !(actor->lastCmd & CMD_BUTTON2))
+		{
+			GameEvent e = GameEventNew(GAME_EVENT_ACTOR_PICKUP_ALL);
+			e.u.ActorPickupAll.UID = actor->uid;
+			e.u.ActorPickupAll.PickupAll = true;
 			GameEventsEnqueue(&gGameEvents, e);
 		}
 	}
 
 	actor->lastCmd = cmd;
-	if (cmd & CMD_BUTTON2)
-	{
-		if (CMD_HAS_DIRECTION(cmd))
-		{
-			actor->specialCmdDir = true;
-		}
-		else
-		{
-			// Special: pick up things that can only be picked up on demand
-			if (!actor->PickupAll)
-			{
-				GameEvent e = GameEventNew(GAME_EVENT_ACTOR_PICKUP_ALL);
-				e.u.ActorPickupAll.UID = actor->uid;
-				e.u.ActorPickupAll.PickupAll = true;
-				GameEventsEnqueue(&gGameEvents, e);
-			}
-			actor->PickupAll = true;
-		}
-	}
-	else
-	{
-		actor->specialCmdDir = false;
-		if (actor->PickupAll)
-		{
-			GameEvent e = GameEventNew(GAME_EVENT_ACTOR_PICKUP_ALL);
-			e.u.ActorPickupAll.UID = actor->uid;
-			e.u.ActorPickupAll.PickupAll = false;
-			GameEventsEnqueue(&gGameEvents, e);
-		}
-		actor->PickupAll = false;
-	}
 }
 static bool ActorTryMove(TActor *actor, int cmd, int hasShot, int ticks)
 {
@@ -839,39 +853,14 @@ static bool ActorTryMove(TActor *actor, int cmd, int hasShot, int ticks)
 	if (willMove)
 	{
 		const float moveAmount = ActorGetCharacter(actor)->speed * ticks;
-		if (cmd & CMD_LEFT)
+		struct vec2 moveVel = svec2_zero();
+		if (cmd & CMD_LEFT) moveVel.x--;
+		else if (cmd & CMD_RIGHT) moveVel.x++;
+		if (cmd & CMD_UP) moveVel.y--;
+		else if (cmd & CMD_DOWN) moveVel.y++;
+		if (!svec2_is_zero(moveVel))
 		{
-			actor->MoveVel.x -= moveAmount;
-		}
-		else if (cmd & CMD_RIGHT)
-		{
-			actor->MoveVel.x += moveAmount;
-		}
-		if (cmd & CMD_UP)
-		{
-			actor->MoveVel.y -= moveAmount;
-		}
-		else if (cmd & CMD_DOWN)
-		{
-			actor->MoveVel.y += moveAmount;
-		}
-
-		if (actor->anim.Type != ACTORANIMATION_WALKING)
-		{
-			GameEvent e = GameEventNew(GAME_EVENT_ACTOR_STATE);
-			e.u.ActorState.UID = actor->uid;
-			e.u.ActorState.State = (int32_t)ACTORANIMATION_WALKING;
-			GameEventsEnqueue(&gGameEvents, e);
-		}
-	}
-	else
-	{
-		if (actor->anim.Type != ACTORANIMATION_IDLE)
-		{
-			GameEvent e = GameEventNew(GAME_EVENT_ACTOR_STATE);
-			e.u.ActorState.UID = actor->uid;
-			e.u.ActorState.State = (int32_t)ACTORANIMATION_IDLE;
-			GameEventsEnqueue(&gGameEvents, e);
+			actor->MoveVel = svec2_scale(svec2_normalize(moveVel), moveAmount);
 		}
 	}
 
@@ -885,7 +874,7 @@ static bool ActorTryMove(TActor *actor, int cmd, int hasShot, int ticks)
 		GameEventsEnqueue(&gGameEvents, e);
 	}
 
-	return willMove;
+	return willMove || !svec2_is_zero(actor->thing.Vel);
 }
 
 void SlideActor(TActor *actor, int cmd)
@@ -917,6 +906,9 @@ void SlideActor(TActor *actor, int cmd)
 	actor->slideLock = SLIDE_LOCK;
 }
 
+static void ActorAddBloodSplatters(
+	TActor *a, const int power, const float mass, const struct vec2 hitVector);
+
 static void ActorUpdatePosition(TActor *actor, int ticks);
 static void ActorDie(TActor *actor);
 void UpdateAllActors(int ticks)
@@ -943,11 +935,11 @@ void UpdateAllActors(int ticks)
 		{
 			const CollisionParams params =
 			{
-				TILEITEM_IMPASSABLE, COLLISIONTEAM_NONE,
+				THING_IMPASSABLE, COLLISIONTEAM_NONE,
 				IsPVP(gCampaign.Entry.Mode)
 			};
-			const TTileItem *collidingItem = OverlapGetFirstItem(
-				&actor->tileItem, actor->Pos, actor->tileItem.size, params);
+			const Thing *collidingItem = OverlapGetFirstItem(
+				&actor->thing, actor->Pos, actor->thing.size, params);
 			if (collidingItem && collidingItem->kind == KIND_CHARACTER)
 			{
 				TActor *collidingActor = CArrayGet(
@@ -990,32 +982,32 @@ static void CheckManualPickups(TActor *a);
 static void ActorUpdatePosition(TActor *actor, int ticks)
 {
 	struct vec2 newPos = svec2_add(actor->Pos, actor->MoveVel);
-	if (!svec2_is_zero(actor->tileItem.Vel))
+	if (!svec2_is_zero(actor->thing.Vel))
 	{
 		newPos = svec2_add(
-			newPos, svec2_scale(actor->tileItem.Vel, (float)ticks));
+			newPos, svec2_scale(actor->thing.Vel, (float)ticks));
 
 		for (int i = 0; i < ticks; i++)
 		{
-			if (actor->tileItem.Vel.x > FLT_EPSILON)
+			if (actor->thing.Vel.x > FLT_EPSILON)
 			{
-				actor->tileItem.Vel.x =
-					MAX(0, actor->tileItem.Vel.x - VEL_DECAY_X);
+				actor->thing.Vel.x =
+					MAX(0, actor->thing.Vel.x - VEL_DECAY_X);
 			}
-			else if (actor->tileItem.Vel.x < -FLT_EPSILON)
+			else if (actor->thing.Vel.x < -FLT_EPSILON)
 			{
-				actor->tileItem.Vel.x =
-					MIN(0, actor->tileItem.Vel.x + VEL_DECAY_X);
+				actor->thing.Vel.x =
+					MIN(0, actor->thing.Vel.x + VEL_DECAY_X);
 			}
-			if (actor->tileItem.Vel.y > FLT_EPSILON)
+			if (actor->thing.Vel.y > FLT_EPSILON)
 			{
-				actor->tileItem.Vel.y =
-					MAX(0, actor->tileItem.Vel.y - VEL_DECAY_Y);
+				actor->thing.Vel.y =
+					MAX(0, actor->thing.Vel.y - VEL_DECAY_Y);
 			}
-			else if (actor->tileItem.Vel.y < FLT_EPSILON)
+			else if (actor->thing.Vel.y < FLT_EPSILON)
 			{
-				actor->tileItem.Vel.y =
-					MIN(0, actor->tileItem.Vel.y + VEL_DECAY_Y);
+				actor->thing.Vel.y =
+					MIN(0, actor->thing.Vel.y + VEL_DECAY_Y);
 			}
 		}
 	}
@@ -1029,7 +1021,7 @@ static void ActorUpdatePosition(TActor *actor, int ticks)
 }
 // Check if the actor is over any manual pickups
 static bool CheckManualPickupFunc(
-	TTileItem *ti, void *data, const struct vec2 colA, const struct vec2 colB,
+	Thing *ti, void *data, const struct vec2 colA, const struct vec2 colB,
 	const struct vec2 normal);
 static void CheckManualPickups(TActor *a)
 {
@@ -1039,12 +1031,12 @@ static void CheckManualPickups(TActor *a)
 	{
 		0, CalcCollisionTeam(true, a), IsPVP(gCampaign.Entry.Mode)
 	};
-	OverlapTileItems(
-		&a->tileItem, a->Pos,
-		a->tileItem.size, params, CheckManualPickupFunc, a, NULL, NULL, NULL);
+	OverlapThings(
+		&a->thing, a->Pos,
+		a->thing.size, params, CheckManualPickupFunc, a, NULL, NULL, NULL);
 }
 static bool CheckManualPickupFunc(
-	TTileItem *ti, void *data, const struct vec2 colA, const struct vec2 colB,
+	Thing *ti, void *data, const struct vec2 colA, const struct vec2 colB,
 	const struct vec2 normal)
 {
 	UNUSED(colA);
@@ -1058,13 +1050,27 @@ static bool CheckManualPickupFunc(
 	const PlayerData *pData = PlayerDataGetByUID(a->PlayerUID);
 	if (pData->IsLocal && IsPlayerHuman(pData))
 	{
-		char buf[256];
-		strcpy(buf, "");
+		char buttonName[256];
+		strcpy(buttonName, "");
 		InputGetButtonName(
-			pData->inputDevice, pData->deviceIndex, CMD_BUTTON2, buf);
-		sprintf(a->Chatter, "%s to pick up\n%s",
-			buf, IdWeaponClass(p->class->u.GunId)->name);
-		a->ChatterCounter = 2;
+			pData->inputDevice, pData->deviceIndex, CMD_BUTTON2, buttonName);
+		const char *pickupName;
+		switch (p->class->Type)
+		{
+		case PICKUP_AMMO:
+			pickupName = AmmoGetById(&gAmmo, p->class->u.Ammo.Id)->Name;
+			break;
+		case PICKUP_GUN:
+			pickupName = IdWeaponClass(p->class->u.GunId)->name;
+			break;
+		default:
+			CASSERT(false, "unknown pickup type");
+			pickupName = "???";
+			break;
+		}
+		char buf[256];
+		sprintf(buf, "%s to pick up\n%s", buttonName, pickupName);
+		ActorSetChatter(a, buf, 2);
 	}
 	// If co-op AI, alert it so it can try to pick the gun up
 	if (a->aiContext != NULL)
@@ -1132,7 +1138,7 @@ static void ActorAddAmmoPickup(const TActor *actor)
 			sprintf(e.u.AddPickup.PickupClass, "ammo_%s", a->Name);
 			e.u.AddPickup.IsRandomSpawned = false;
 			e.u.AddPickup.SpawnerUID = -1;
-			e.u.AddPickup.TileItemFlags = 0;
+			e.u.AddPickup.ThingFlags = 0;
 			// Add a little random offset so the pickups aren't all together
 			const struct vec2 offset = svec2(
 				(float)RAND_INT(-TILE_WIDTH, TILE_WIDTH) / 2,
@@ -1163,18 +1169,7 @@ static void ActorAddGunPickup(const TActor *actor)
 				break;
 			}
 		}
-		if (!w->Gun->CanDrop)
-		{
-			return;
-		}
-		GameEvent e = GameEventNew(GAME_EVENT_ADD_PICKUP);
-		e.u.AddPickup.UID = PickupsGetNextUID();
-		sprintf(e.u.AddPickup.PickupClass, "gun_%s", w->Gun->name);
-		e.u.AddPickup.IsRandomSpawned = false;
-		e.u.AddPickup.SpawnerUID = -1;
-		e.u.AddPickup.TileItemFlags = 0;
-		e.u.AddPickup.Pos = Vec2ToNet(actor->Pos);
-		GameEventsEnqueue(&gGameEvents, e);
+		PickupAddGun(w->Gun, actor->Pos);
 	}
 }
 static bool IsUnarmedBot(const TActor *actor)
@@ -1191,7 +1186,7 @@ static void ActorAddBloodPool(const TActor *a)
 	const MapObject *mo = RandomBloodMapObject(&gMapObjects);
 	strcpy(e.u.MapObjectAdd.MapObjectClass, mo->Name);
 	e.u.MapObjectAdd.Pos = Vec2ToNet(a->Pos);
-	e.u.MapObjectAdd.TileItemFlags = MapObjectGetFlags(mo);
+	e.u.MapObjectAdd.ThingFlags = MapObjectGetFlags(mo);
 	e.u.MapObjectAdd.Health = mo->Health;
 	GameEventsEnqueue(&gGameEvents, e);
 }
@@ -1289,14 +1284,13 @@ TActor *ActorAdd(NActorAdd aa)
 	}
 	actor->health = aa.Health;
 	actor->action = ACTORACTION_MOVING;
-	actor->tileItem.Pos.x = actor->tileItem.Pos.y = -1;
-	actor->tileItem.kind = KIND_CHARACTER;
-	actor->tileItem.getPicFunc = NULL;
-	actor->tileItem.drawFunc = NULL;
-	actor->tileItem.size = svec2i(ACTOR_W, ACTOR_H);
-	actor->tileItem.flags =
-		TILEITEM_IMPASSABLE | TILEITEM_CAN_BE_SHOT | aa.TileItemFlags;
-	actor->tileItem.id = id;
+	actor->thing.Pos.x = actor->thing.Pos.y = -1;
+	actor->thing.kind = KIND_CHARACTER;
+	actor->thing.drawFunc = NULL;
+	actor->thing.size = svec2i(ACTOR_W, ACTOR_H);
+	actor->thing.flags =
+		THING_IMPASSABLE | THING_CAN_BE_SHOT | aa.ThingFlags;
+	actor->thing.id = id;
 	actor->isInUse = true;
 
 	actor->flags = FLAGS_SLEEPING | c->flags;
@@ -1306,11 +1300,11 @@ TActor *ActorAdd(NActorAdd aa)
 		actor->flags &= ~FLAGS_SLEEPING;
 	}
 	// Rescue objectives always have follower flag on
-	if (actor->tileItem.flags & TILEITEM_OBJECTIVE)
+	if (actor->thing.flags & THING_OBJECTIVE)
 	{
 		const Objective *o = CArrayGet(
 			&gMission.missionData->Objectives,
-			ObjectiveFromTileItem(actor->tileItem.flags));
+			ObjectiveFromThing(actor->thing.flags));
 		if (o->Type == OBJECTIVE_RESCUE)
 		{
 			// If they don't have prisoner flag set, automatically rescue them
@@ -1320,7 +1314,7 @@ TActor *ActorAdd(NActorAdd aa)
 				e.u.Rescue.UID = aa.UID;
 				GameEventsEnqueue(&gGameEvents, e);
 				UpdateMissionObjective(
-					&gMission, actor->tileItem.flags, OBJECTIVE_RESCUE, 1);
+					&gMission, actor->thing.flags, OBJECTIVE_RESCUE, 1);
 			}
 		}
 	}
@@ -1359,7 +1353,7 @@ void ActorDestroy(TActor *a)
 {
 	CASSERT(a->isInUse, "Destroying in-use actor");
 	CArrayTerminate(&a->ammo);
-	MapRemoveTileItem(&gMap, &a->tileItem);
+	MapRemoveThing(&gMap, &a->thing);
 	// Set PlayerData's ActorUID to -1 to signify actor destruction
 	PlayerData *p = PlayerDataGetByUID(a->PlayerUID);
 	if (p != NULL) p->ActorUID = -1;
@@ -1447,8 +1441,9 @@ void ActorSwitchGun(const NActorSwitchGun sg)
 	TActor *a = ActorGetByUID(sg.UID);
 	if (a == NULL || !a->isInUse) return;
 	a->gunIndex = sg.GunIdx;
-	SoundPlayAt(
-		&gSoundDevice, ACTOR_GET_WEAPON(a)->Gun->SwitchSound, a->tileItem.Pos);
+	const WeaponClass *gun = ACTOR_GET_WEAPON(a)->Gun;
+	SoundPlayAt(&gSoundDevice, gun->SwitchSound, a->thing.Pos);
+	ActorSetChatter(a, gun->name, CHATTER_SWITCH_GUN);
 }
 
 bool ActorIsImmune(const TActor *actor, const special_damage_e damage)
@@ -1512,7 +1507,42 @@ void ActorTakeSpecialDamage(TActor *actor, special_damage_e damage)
 	}
 }
 
-void ActorTakeHit(TActor *actor, const special_damage_e damage)
+static void ActorTakeHit(TActor *actor, const special_damage_e damage);
+void ActorHit(const NThingDamage d)
+{
+	TActor *a = ActorGetByUID(d.UID);
+	if (!a->isInUse) return;
+	ActorTakeHit(a, d.Special);
+	if (d.Power > 0)
+	{
+		DamageActor(a, d.Power, d.SourceActorUID);
+
+		// Add damage text
+		GameEvent s = GameEventNew(GAME_EVENT_ADD_PARTICLE);
+		s.u.AddParticle.Class =
+			StrParticleClass(&gParticleClasses, "damage_text");
+		s.u.AddParticle.Pos = svec2_add(
+			a->Pos, svec2(RAND_FLOAT(-3, 3), RAND_FLOAT(-3, 3)));
+		s.u.AddParticle.Z = BULLET_Z * Z_FACTOR;
+		s.u.AddParticle.DZ = 3;
+		sprintf(s.u.AddParticle.Text, "-%d", (int)d.Power);
+		GameEventsEnqueue(&gGameEvents, s);
+
+		ActorAddBloodSplatters(a, d.Power, d.Mass, NetToVec2(d.Vel));
+
+		// Rumble if taking hit
+		if (a->PlayerUID >= 0)
+		{
+			const PlayerData *p = PlayerDataGetByUID(a->PlayerUID);
+			if (p->inputDevice == INPUT_DEVICE_JOYSTICK)
+			{
+				JoyImpact(p->deviceIndex);
+			}
+		}
+	}
+}
+
+static void ActorTakeHit(TActor *actor, const special_damage_e damage)
 {
 	// Wake up if this is an AI
 	if (!gCampaign.IsClient && actor->aiContext)
@@ -1566,7 +1596,7 @@ bool ActorIsInvulnerable(
 	return 0;
 }
 
-void ActorAddBloodSplatters(
+static void ActorAddBloodSplatters(
 	TActor *a, const int power, const float mass, const struct vec2 hitVector)
 {
 	const GoreAmount ga = ConfigGetEnum(&gConfig, "Graphics.Gore");
@@ -1576,6 +1606,7 @@ void ActorAddBloodSplatters(
 	int bloodPower = power * 2;
 	// Randomly cycle through the blood types
 	int bloodSize = 1;
+	const float speedBase = MAX(1.0f, mass) * SHOT_IMPULSE_FACTOR;
 	while (bloodPower > 0)
 	{
 		Emitter *em = NULL;
@@ -1596,8 +1627,8 @@ void ActorAddBloodSplatters(
 		{
 			bloodSize = 1;
 		}
-		const float speed = RAND_FLOAT(0.5f, 1) * mass * SHOT_IMPULSE_FACTOR;
-		const struct vec2 vel = svec2_scale(hitVector, speed);
+		const struct vec2 vel =
+			svec2_scale(hitVector, speedBase * RAND_FLOAT(0.5f, 1));
 		EmitterStart(em, a->Pos, 10, vel);
 		switch (ga)
 		{

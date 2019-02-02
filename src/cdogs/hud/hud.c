@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2017 Cong Xu
+    Copyright (c) 2013-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -349,7 +349,9 @@ static void DrawLives(
 	}
 	for (int i = 0; i < player->Lives; i++)
 	{
-		DrawHead(&player->Char, DIRECTION_DOWN, drawPos);
+		DrawHead(
+			device->gameWindow.renderer, &player->Char, DIRECTION_DOWN,
+			drawPos);
 		drawPos.x += xStep;
 	}
 }
@@ -447,8 +449,9 @@ static void DrawRadar(
 
 	if (!svec2i_is_zero(pos))
 	{
-		const struct vec2i playerPos = Vec2ToTile(p->tileItem.Pos);
+		const struct vec2i playerPos = Vec2ToTile(p->thing.Pos);
 		AutomapDrawRegion(
+			device->gameWindow.renderer,
 			&gMap,
 			pos,
 			svec2i(AUTOMAP_SIZE, AUTOMAP_SIZE),
@@ -464,6 +467,7 @@ static void DrawSharedRadar(GraphicsDevice *device, bool showExit)
 	struct vec2i pos = svec2i(w / 2 - AUTOMAP_SIZE / 2, AUTOMAP_PADDING);
 	const struct vec2i playerMidpoint = Vec2ToTile(PlayersGetMidpoint());
 	AutomapDrawRegion(
+		device->gameWindow.renderer,
 		&gMap,
 		pos,
 		svec2i(AUTOMAP_SIZE, AUTOMAP_SIZE),
@@ -575,12 +579,12 @@ static void DrawObjectiveCompass(
 		{
 			Tile *tile = MapGetTile(map, tilePos);
 			CA_FOREACH(ThingId, tid, tile->things)
-				TTileItem *ti = ThingIdGetTileItem(tid);
-				if (!(ti->flags & TILEITEM_OBJECTIVE))
+				Thing *ti = ThingIdGetThing(tid);
+				if (!(ti->flags & THING_OBJECTIVE))
 				{
 					continue;
 				}
-				const int objective = ObjectiveFromTileItem(ti->flags);
+				const int objective = ObjectiveFromThing(ti->flags);
 				const Objective *o =
 					CArrayGet(&gMission.missionData->Objectives, objective);
 				if (o->Flags & OBJECTIVE_HIDDEN)
@@ -1006,7 +1010,9 @@ static void DrawHUDMessage(HUD *hud)
 			(hud->device->cachedConfig.Res.x -
 				FontStrW(hud->message)) / 2,
 			AUTOMAP_SIZE + AUTOMAP_PADDING + AUTOMAP_PADDING);
-		FontStrMask(hud->message, pos, colorCyan);
+		const HSV tint = { -1.0, 1.0, Pulse256(hud->mission->time) / 256.0};
+		const color_t mask = ColorTint(colorCyan, tint);
+		FontStrMask(hud->message, pos, mask);
 	}
 }
 
@@ -1027,8 +1033,9 @@ static void DrawKeycards(HUD *hud)
 	{
 		if (hud->mission->KeyFlags & keyFlags[i])
 		{
-			const Pic *pic = KeyPickupClass(
-				hud->mission->missionData->KeyStyle, i)->Pic;
+			const Pic *pic = CPicGetPic(
+				&KeyPickupClass(hud->mission->missionData->KeyStyle, i)->Pic,
+				0);
 			Blit(
 				&gGraphicsDevice,
 				pic,

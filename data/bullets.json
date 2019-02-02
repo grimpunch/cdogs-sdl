@@ -29,6 +29,7 @@
     },
     {
       "Name": "mg",
+      "WallMark": "bullet_hole",
       "Speed": 768,
       "Range": 60,
       "Power": 10,
@@ -40,6 +41,7 @@
         "Type": "Normal",
         "Pic": "bullet_ball"
       },
+      "WallMark": "bullet_hole",
       "Speed": 640,
       "Range": 50,
       "Power": 15,
@@ -94,6 +96,7 @@
     },
     {
       "Name": "frag",
+      "WallMark": "bullet_hole",
       "Speed": 640,
       "Range": 50,
       "Power": 40,
@@ -630,10 +633,15 @@
     {
       "Name": "9mm",
       "Pic": {
-        "Type": "Directional",
-        "Sprites": "9mm"
+        "Type": "Normal",
+        "Pic": ""
+      },
+      "Trail": {
+        "Particle": "trail",
+        "Width": 1.0
       },
       "OutOfRangeSpark": "spark",
+      "WallMark": "bullet_hole",
       "Speed": 25000,
       "Range": 1,
       "Power": 12,

@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2014-2017, Cong Xu
+    Copyright (c) 2014-2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -28,15 +28,18 @@
 #include "handle_game_events.h"
 
 #include "actor_placement.h"
+#include "actors.h"
 #include "ai_utils.h"
 #include "damage.h"
 #include "events.h"
 #include "game_events.h"
 #include "joystick.h"
+#include "log.h"
 #include "net_server.h"
 #include "objs.h"
 #include "particle.h"
 #include "pickup.h"
+#include "thing.h"
 #include "triggers.h"
 
 #define RELOAD_DISTANCE_PLUS 200
@@ -86,14 +89,14 @@ static void HandleGameEvent(
 	case GAME_EVENT_TILE_SET:
 		{
 			struct vec2i pos = Net2Vec2i(e.u.TileSet.Pos);
+			const TileClass *tileClass = StrTileClass(e.u.TileSet.ClassName);
+			const TileClass *tileClassAlt =
+				StrTileClass(e.u.TileSet.ClassAltName);
 			for (int i = 0; i <= e.u.TileSet.RunLength; i++)
 			{
 				Tile *t = MapGetTile(&gMap, pos);
-				t->flags = e.u.TileSet.Flags;
-				t->pic = PicManagerGetNamedPic(
-					&gPicManager, e.u.TileSet.PicName);
-				t->picAlt = PicManagerGetNamedPic(
-					&gPicManager, e.u.TileSet.PicAltName);
+				t->Class = tileClass;
+				t->ClassAlt = tileClassAlt;
 				pos.x++;
 				if (pos.x == gMap.Size.x)
 				{
@@ -103,11 +106,11 @@ static void HandleGameEvent(
 			}
 		}
 		break;
+	case GAME_EVENT_THING_DAMAGE:
+		ThingDamage(e.u.ThingDamage);
+		break;
 	case GAME_EVENT_MAP_OBJECT_ADD:
 		ObjAdd(e.u.MapObjectAdd);
-		break;
-	case GAME_EVENT_MAP_OBJECT_DAMAGE:
-		DamageObject(e.u.MapObjectDamage);
 		break;
 	case GAME_EVENT_MAP_OBJECT_REMOVE:
 		ObjRemove(e.u.MapObjectRemove);
@@ -206,12 +209,12 @@ static void HandleGameEvent(
 		{
 			TActor *a = ActorGetByUID(e.u.ActorSlide.UID);
 			if (!a->isInUse) break;
-			a->tileItem.Vel = NetToVec2(e.u.ActorSlide.Vel);
+			a->thing.Vel = NetToVec2(e.u.ActorSlide.Vel);
 			// Slide sound
 			if (ConfigGetBool(&gConfig, "Sound.Footsteps"))
 			{
 				SoundPlayAt(
-					&gSoundDevice, StrSound("slide"), a->tileItem.Pos);
+					&gSoundDevice, StrSound("slide"), a->thing.Pos);
 			}
 		}
 		break;
@@ -219,8 +222,8 @@ static void HandleGameEvent(
 		{
 			TActor *a = ActorGetByUID(e.u.ActorImpulse.UID);
 			if (!a->isInUse) break;
-			a->tileItem.Vel =
-				svec2_add(a->tileItem.Vel, NetToVec2(e.u.ActorImpulse.Vel));
+			a->thing.Vel =
+				svec2_add(a->thing.Vel, NetToVec2(e.u.ActorImpulse.Vel));
 			const struct vec2 pos = NetToVec2(e.u.ActorImpulse.Pos);
 			if (!svec2_is_zero(pos))
 			{
@@ -352,28 +355,7 @@ static void HandleGameEvent(
 		}
 		break;
 	case GAME_EVENT_ACTOR_MELEE:
-		{
-			const TActor *a = ActorGetByUID(e.u.Melee.UID);
-			if (!a->isInUse) break;
-			const BulletClass *b = StrBulletClass(e.u.Melee.BulletClass);
-			if ((HitType)e.u.Melee.HitType != HIT_NONE &&
-				HasHitSound(a->flags, a->PlayerUID,
-				(TileItemKind)e.u.Melee.TargetKind, e.u.Melee.TargetUID,
-				SPECIAL_NONE, false))
-			{
-				PlayHitSound(&b->HitSound, (HitType)e.u.Melee.HitType, a->Pos);
-			}
-			if (!gCampaign.IsClient)
-			{
-				// TODO: melee hitback (vel)?
-				Damage(
-					svec2_zero(),
-					b->Power, b->Mass,
-					a->flags, a->PlayerUID, a->uid,
-					(TileItemKind)e.u.Melee.TargetKind, e.u.Melee.TargetUID,
-					SPECIAL_NONE);
-			}
-		}
+		DamageMelee(e.u.Melee);
 		break;
 	case GAME_EVENT_ADD_PICKUP:
 		PickupAdd(e.u.AddPickup);
@@ -391,34 +373,13 @@ static void HandleGameEvent(
 		}
 		break;
 	case GAME_EVENT_BULLET_BOUNCE:
-		{
-			TMobileObject *o = MobObjGetByUID(e.u.BulletBounce.UID);
-			if (o == NULL || !o->isInUse) break;
-			const struct vec2 bouncePos = NetToVec2(e.u.BulletBounce.BouncePos);
-			if (e.u.BulletBounce.HitSound)
-			{
-				PlayHitSound(
-					&o->bulletClass->HitSound,
-					(HitType)e.u.BulletBounce.HitType,
-					bouncePos);
-			}
-			if (e.u.BulletBounce.Spark && o->bulletClass->Spark != NULL)
-			{
-				GameEvent s = GameEventNew(GAME_EVENT_ADD_PARTICLE);
-				s.u.AddParticle.Class = o->bulletClass->Spark;
-				s.u.AddParticle.Pos = bouncePos;
-				s.u.AddParticle.Z = o->z;
-				GameEventsEnqueue(&gGameEvents, s);
-			}
-			o->Pos = NetToVec2(e.u.BulletBounce.Pos);
-			o->tileItem.Vel = NetToVec2(e.u.BulletBounce.Vel);
-		}
+		BulletBounce(e.u.BulletBounce);
 		break;
 	case GAME_EVENT_REMOVE_BULLET:
 		{
 			TMobileObject *o = MobObjGetByUID(e.u.RemoveBullet.UID);
 			if (o == NULL || !o->isInUse) break;
-			MobObjDestroy(o);
+			BulletDestroy(o);
 		}
 		break;
 	case GAME_EVENT_PARTICLE_REMOVE:
@@ -453,8 +414,7 @@ static void HandleGameEvent(
 					ab.u.AddBullet.Elevation =
 						RAND_INT(wc->ElevationLow, wc->ElevationHigh);
 					ab.u.AddBullet.Flags = e.u.GunFire.Flags;
-					ab.u.AddBullet.PlayerUID = e.u.GunFire.PlayerUID;
-					ab.u.AddBullet.ActorUID = e.u.GunFire.UID;
+					ab.u.AddBullet.ActorUID = e.u.GunFire.ActorUID;
 					GameEventsEnqueue(&gGameEvents, ab);
 				}
 			}
@@ -520,44 +480,6 @@ static void HandleGameEvent(
 		break;
 	case GAME_EVENT_ADD_PARTICLE:
 		ParticleAdd(&gParticles, e.u.AddParticle);
-		break;
-	case GAME_EVENT_ACTOR_HIT:
-		{
-			TActor *a = ActorGetByUID(e.u.ActorHit.UID);
-			if (!a->isInUse) break;
-			ActorTakeHit(a, e.u.ActorHit.Special);
-			if (e.u.ActorHit.Power > 0)
-			{
-				DamageActor(
-					a, e.u.ActorHit.Power, e.u.ActorHit.HitterPlayerUID);
-
-				// Add damage text
-				GameEvent s = GameEventNew(GAME_EVENT_ADD_PARTICLE);
-				s.u.AddParticle.Class =
-					StrParticleClass(&gParticleClasses, "damage_text");
-				s.u.AddParticle.Pos = svec2_add(
-					a->Pos, svec2(RAND_FLOAT(-3, 3), RAND_FLOAT(-3, 3)));
-				s.u.AddParticle.Z = BULLET_Z * Z_FACTOR;
-				s.u.AddParticle.DZ = 3;
-				sprintf(
-					s.u.AddParticle.Text, "-%d", (int)e.u.ActorHit.Power);
-				GameEventsEnqueue(&gGameEvents, s);
-
-				ActorAddBloodSplatters(
-					a, e.u.ActorHit.Power, e.u.ActorHit.Mass,
-					NetToVec2(e.u.ActorHit.Vel));
-
-				// Rumble if taking hit
-				if (a->PlayerUID >= 0)
-				{
-					const PlayerData *p = PlayerDataGetByUID(a->PlayerUID);
-					if (p->inputDevice == INPUT_DEVICE_JOYSTICK)
-					{
-						JoyImpact(p->deviceIndex);
-					}
-				}
-			}
-		}
 		break;
 	case GAME_EVENT_TRIGGER:
 		{
@@ -645,9 +567,17 @@ static void HandleGameEvent(
 		}
 		break;
 	case GAME_EVENT_MISSION_COMPLETE:
-		if (camera != NULL && e.u.MissionComplete.ShowMsg)
+		if (e.u.MissionComplete.ShowMsg)
 		{
-			HUDDisplayMessage(&camera->HUD, "Mission complete", -1);
+			if (!gMission.HasPlayedCompleteSound)
+			{
+				SoundPlay(&gSoundDevice, StrSound("mission_complete"));
+				gMission.HasPlayedCompleteSound = true;
+			}
+			if (camera != NULL)
+			{
+				HUDDisplayMessage(&camera->HUD, "Mission complete", -1);
+			}
 		}
 		// Don't show exit area or arrow if PVP
 		if (!IsPVP(gCampaign.Entry.Mode))

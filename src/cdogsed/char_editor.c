@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2017 Cong Xu
+    Copyright (c) 2017-2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -80,8 +80,6 @@ const float bg[4] = { 0.16f, 0.1f, 0.1f, 1.f };
 
 // Util functions
 static void LoadTexFromPic(const GLuint texid, const Pic *pic);
-static void LoadMultiChannelTexFromPic(
-	const GLuint texid, const Pic *pic, const CharColors *colors);
 static void BeforeDrawTex(const GLuint texid);
 
 
@@ -149,8 +147,8 @@ void CharEditor(
 	{
 		const GLuint *texid = CArrayGet(&ec.texIdsCharClasses, i);
 		const CharacterClass *c = IndexCharacterClass(i);
-		LoadMultiChannelTexFromPic(
-			*texid, GetHeadPic(c, DIRECTION_DOWN, GUNSTATE_READY), &cc);
+		LoadTexFromPic(
+			*texid, GetHeadPic(c, DIRECTION_DOWN, GUNSTATE_READY, &cc));
 	}
 	CArrayInit(&ec.texIdsGuns, sizeof(GLuint));
 	CArrayResize(&ec.texIdsGuns, NumGuns(), NULL);
@@ -787,38 +785,31 @@ static void DrawFlag(
 	}
 }
 
-
+static Pic PadEven(const Pic *pic);
 static void LoadTexFromPic(const GLuint texid, const Pic *pic)
 {
 	glBindTexture(GL_TEXTURE_2D, texid);
+	Pic padded = PadEven(pic);
 	glTexImage2D(
-		GL_TEXTURE_2D, 0, GL_RGBA, pic->size.x, pic->size.y, 0, GL_BGRA,
-		GL_UNSIGNED_BYTE, pic->Data);
+		GL_TEXTURE_2D, 0, GL_RGBA, padded.size.x, padded.size.y, 0, GL_BGRA,
+		GL_UNSIGNED_BYTE, padded.Data);
+	PicFree(&padded);
+	glBindTexture(GL_TEXTURE_2D, 0);
 }
-static void LoadMultiChannelTexFromPic(
-	const GLuint texid, const Pic *pic, const CharColors *colors)
+static Pic PadEven(const Pic *pic)
 {
-	glBindTexture(GL_TEXTURE_2D, texid);
-	Uint32 *data;
-	CMALLOC(data, pic->size.x * pic->size.y * sizeof *data);
-	for (int i = 0; i < pic->size.x * pic->size.y; i++)
+	// OGL needs even dimensions for texture
+	Pic p;
+	memset(&p, 0, sizeof p);
+	p.size = svec2i((pic->size.x + 1) / 2 * 2, (pic->size.y + 1) / 2 * 2);
+	CCALLOC(p.Data, p.size.x * p.size.y * sizeof *((Pic *)0)->Data);
+	for (int i = 0; i < pic->size.y; i++)
 	{
-		const Uint32 pixel = pic->Data[i];
-		const color_t color = PIXEL2COLOR(pixel);
-		if (pixel == 0)
-		{
-			data[i] = 0;
-		}
-		else
-		{
-			data[i] = PixelMult(
-				pixel, COLOR2PIXEL(CharColorsGetChannelMask(colors, color.a)));
-		}
+		memcpy(
+			p.Data + i * p.size.x, pic->Data + i * pic->size.x,
+			pic->size.x * sizeof *p.Data);
 	}
-	glTexImage2D(
-		GL_TEXTURE_2D, 0, GL_RGBA, pic->size.x, pic->size.y, 0, GL_BGRA,
-		GL_UNSIGNED_BYTE, data);
-	CFREE(data);
+	return p;
 }
 
 static void BeforeDrawTex(const GLuint texid)
@@ -834,8 +825,8 @@ static void DrawCharacter(
 {
 	const int frame = AnimationGetFrame(anim);
 	ActorPics pics = GetCharacterPics(
-		c, d, anim->Type, frame,
-		c->Gun->Pic, GUNSTATE_READY, false, NULL, NULL, 0);
+		c, d, d, anim->Type, frame,
+		c->Gun->Sprites, GUNSTATE_READY, true, NULL, NULL, 0);
 	for (int i = 0; i < BODY_PART_COUNT; i++)
 	{
 		const Pic *pic = pics.OrderedPics[i];
@@ -844,7 +835,7 @@ static void DrawCharacter(
 			continue;
 		}
 		const struct vec2i drawPos = svec2i_add(pos, pics.OrderedOffsets[i]);
-		LoadMultiChannelTexFromPic(texids[i], pic, pics.Colors);
+		LoadTexFromPic(texids[i], pic);
 		struct nk_image tex = nk_image_id((int)texids[i]);
 		glTexParameteri(
 			GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);

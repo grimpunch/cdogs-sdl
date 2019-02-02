@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2013-2016, Cong Xu
+    Copyright (c) 2013-2016, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -48,12 +48,13 @@ typedef struct
 extern PicManager gPicManager;
 
 void PicManagerInit(PicManager *pm);
-void PicManagerLoad(PicManager *pm, const char *path);
+void PicManagerLoad(PicManager *pm);
 void PicManagerLoadDir(
 	PicManager *pm, const char *path, const char *prefix,
 	map_t pics, map_t sprites);
 void PicManagerClearCustom(PicManager *pm);
 void PicManagerTerminate(PicManager *pm);
+void PicManagerReloadTextures(PicManager *pm);
 
 // Note: return ptr to NamedPic so we can store that instead of the name
 NamedPic *PicManagerGetNamedPic(const PicManager *pm, const char *name);
@@ -69,15 +70,13 @@ NamedPic *PicManagerGetMaskedStylePic(
 	const char *name, const char *style, const char *type,
 	const color_t mask, const color_t maskAlt);
 // To support dynamic colours, generate pics on request.
-void PicManagerGenerateMaskedPic(
-	PicManager *pm, const char *name,
-	const color_t mask, const color_t maskAlt);
 void PicManagerGenerateMaskedStylePic(
 	PicManager *pm, const char *name, const char *style, const char *type,
 	const color_t mask, const color_t maskAlt);
+// Get masked character pics
+const NamedSprites *PicManagerGetCharSprites(
+	PicManager *pm, const char *name, const CharColors *colors);
 
-NamedPic *PicManagerGetExitPic(
-	PicManager *pm, const char *style, const bool isShadow);
 int PicManagerGetWallStyleIndex(PicManager *pm, const char *style);
 int PicManagerGetTileStyleIndex(PicManager *pm, const char *style);
 int PicManagerGetExitStyleIndex(PicManager *pm, const char *style);

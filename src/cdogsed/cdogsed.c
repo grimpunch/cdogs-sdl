@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2017, Cong Xu
+    Copyright (c) 2013-2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -66,6 +66,7 @@
 #include <cdogs/files.h>
 #include <cdogs/font_utils.h>
 #include <cdogs/log.h>
+#include <cdogs/player_template.h>
 
 #include <tinydir/tinydir.h>
 
@@ -129,7 +130,7 @@ static struct vec2i GetScreenPos(struct vec2i mapTile)
 		(mapTile.y - sDrawBuffer.yStart) * TILE_HEIGHT + sDrawBuffer.dy);
 }
 
-static int IsBrushPosValid(struct vec2i pos, Mission *m)
+static int IsBrushPosValid(struct vec2i pos, const Mission *m)
 {
 	return pos.x >= 0 && pos.x < m->Size.x &&
 		pos.y >= 0 && pos.y < m->Size.y;
@@ -178,8 +179,10 @@ static void Display(HandleInputResult result)
 	int y = 5;
 	const int w = ec.g->cachedConfig.Res.x;
 	const int h = ec.g->cachedConfig.Res.y;
-	Mission *mission = CampaignGetCurrentMission(&gCampaign);
 
+	ClearScreen(ec.g);
+
+	const Mission *mission = CampaignGetCurrentMission(&gCampaign);
 	if (mission)
 	{
 		// Re-make the background if the resolution has changed
@@ -221,10 +224,6 @@ static void Display(HandleInputResult result)
 			FontStr(s, svec2i(w - 40, h - 16));
 		}
 	}
-	else
-	{
-		ClearScreen(ec.g);
-	}
 
 	if (fileChanged)
 	{
@@ -241,7 +240,8 @@ static void Display(HandleInputResult result)
 
 	if (result.WillDisplayAutomap && mission)
 	{
-		AutomapDraw(AUTOMAP_FLAGS_SHOWALL, true);
+		AutomapDraw(
+			gGraphicsDevice.gameWindow.renderer, AUTOMAP_FLAGS_SHOWALL, true);
 	}
 	else
 	{
@@ -1332,15 +1332,19 @@ int main(int argc, char *argv[])
 	ec.camera = svec2_zero();
 
 	EditorBrushInit(&brush);
-	strcpy(lastFile, "");
+	// initialise to missions dir
+	GetDataFilePath(buf, CDOGS_CAMPAIGN_DIR);
+	RelPath(lastFile, buf, ".");
+	strcat(lastFile, "/");
 
 	gConfig = ConfigLoad(GetConfigFilePath(CONFIG_FILE));
 	PicManagerInit(&gPicManager);
+	TileClassesInit(&gTileClasses);
 	// Hardcode config settings
 	ConfigGet(&gConfig, "Graphics.ScaleFactor")->u.Int.Value = 2;
 	ConfigGet(&gConfig, "Graphics.ScaleMode")->u.Enum.Value = SCALE_MODE_NN;
-	ConfigGet(&gConfig, "Graphics.ResolutionWidth")->u.Int.Value = 400;
-	ConfigGet(&gConfig, "Graphics.ResolutionHeight")->u.Int.Value = 300;
+	ConfigGet(&gConfig, "Graphics.WindowWidth")->u.Int.Value = 800;
+	ConfigGet(&gConfig, "Graphics.WindowHeight")->u.Int.Value = 600;
 	ConfigGet(&gConfig, "Graphics.SecondWindow")->u.Bool.Value = false;
 	// Force enable ammo so that ammo spawners show up
 	ConfigGet(&gConfig, "Game.Ammo")->u.Bool.Value = true;
@@ -1354,7 +1358,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 	FontLoadFromJSON(&gFont, "graphics/font.png", "graphics/font.json");
-	PicManagerLoad(&gPicManager, "graphics");
+	PicManagerLoad(&gPicManager);
 	CharSpriteClassesInit(&gCharSpriteClasses);
 
 	ParticleClassesInit(&gParticleClasses, "data/particles.json");
@@ -1364,6 +1368,7 @@ int main(int argc, char *argv[])
 		"data/bullets.json", "data/guns.json");
 	CharacterClassesInitialize(
 		&gCharacterClasses, "data/character_classes.json");
+	PlayerTemplatesLoad(&gPlayerTemplates, &gCharacterClasses);
 	PickupClassesInit(
 		&gPickupClasses, "data/pickups.json", &gAmmo, &gWeaponClasses);
 	MapObjectsInit(
@@ -1426,8 +1431,10 @@ int main(int argc, char *argv[])
 	DrawBufferTerminate(&sDrawBuffer);
 	GraphicsTerminate(ec.g);
 	CharSpriteClassesTerminate(&gCharSpriteClasses);
+	TileClassesTerminate(&gTileClasses);
 	PicManagerTerminate(&gPicManager);
 	FontTerminate(&gFont);
+	PlayerTemplatesTerminate(&gPlayerTemplates);
 
 	UIObjectDestroy(sObjs);
 	CArrayTerminate(&sDrawObjs);

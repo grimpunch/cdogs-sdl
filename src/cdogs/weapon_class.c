@@ -137,6 +137,10 @@ static void LoadGunDescription(
 		{
 			CSTRDUP(wc->name, defaultGun->name);
 		}
+		if (defaultGun->Sprites)
+		{
+			CSTRDUP(wc->Sprites, defaultGun->Sprites);
+		}
 		if (defaultGun->Description)
 		{
 			CSTRDUP(wc->Description, defaultGun->Description);
@@ -149,9 +153,14 @@ static void LoadGunDescription(
 	LoadStr(&tmp, node, "Pic");
 	if (tmp != NULL)
 	{
-		char buf[CDOGS_PATH_MAX];
-		sprintf(buf, "chars/guns/%s", tmp);
-		wc->Pic = PicManagerGetSprites(&gPicManager, buf);
+		CFREE(wc->Sprites);
+		wc->Sprites = NULL;
+		if (strlen(tmp) > 0)
+		{
+			char buf[CDOGS_PATH_MAX];
+			sprintf(buf, "chars/guns/%s", tmp);
+			CSTRDUP(wc->Sprites, buf);
+		}
 		CFREE(tmp);
 	}
 
@@ -193,6 +202,16 @@ static void LoadGunDescription(
 	if (tmp != NULL)
 	{
 		wc->AmmoId = StrAmmoId(tmp);
+		if (wc->IsGrenade)
+		{
+			// Grenade weapons also allow the ammo pickups to act as gun
+			// pickups
+			Ammo *ammo = AmmoGetById(&gAmmo, wc->AmmoId);
+			CFREE(ammo->DefaultGun);
+			CSTRDUP(ammo->DefaultGun, wc->name);
+			// Replace icon with that of the ammo
+			wc->Icon = ammo->Pic;
+		}
 		CFREE(tmp);
 	}
 
@@ -258,7 +277,8 @@ static void LoadGunDescription(
 	}
 
 	LOG(LM_MAP, LL_DEBUG,
-		"loaded gun name(%s) bullet(%s) ammo(%d) cost(%d) lock(%d)...",
+		"loaded %s name(%s) bullet(%s) ammo(%d) cost(%d) lock(%d)...",
+		wc->IsGrenade ? "grenade" : "gun",
 		wc->name, wc->Bullet != NULL ? wc->Bullet->Name : "", wc->AmmoId,
 		wc->Cost, wc->Lock);
 	LOG(LM_MAP, LL_DEBUG,
@@ -295,6 +315,7 @@ void WeaponClassesClear(CArray *classes)
 static void GunDescriptionTerminate(WeaponClass *wc)
 {
 	CFREE(wc->name);
+	CFREE(wc->Sprites);
 	CFREE(wc->Description);
 	memset(wc, 0, sizeof *wc);
 }
@@ -385,12 +406,11 @@ WeaponClass *IndexWeaponClassReal(const int i)
 void WeaponClassFire(
 	const WeaponClass *wc, const struct vec2 pos, const int z,
 	const double radians,
-	const int flags, const int playerUID, const int uid,
+	const int flags, const int actorUID,
 	const bool playSound, const bool isGun)
 {
 	GameEvent e = GameEventNew(GAME_EVENT_GUN_FIRE);
-	e.u.GunFire.UID = uid;
-	e.u.GunFire.PlayerUID = playerUID;
+	e.u.GunFire.ActorUID = actorUID;
 	strcpy(e.u.GunFire.Gun, wc->name);
 	e.u.GunFire.MuzzlePos = Vec2ToNet(pos);
 	e.u.GunFire.Z = z;
@@ -421,7 +441,7 @@ void WeaponClassAddBrass(
 		Vec2FromRadians(radians + MPI_2), 0.333333f);
 	e.u.AddParticle.Vel.x += RAND_FLOAT(-0.25f, 0.25f);
 	e.u.AddParticle.Vel.y += RAND_FLOAT(-0.25f, 0.25f);
-	e.u.AddParticle.Angle = RAND_DOUBLE(0, M_PI * 2);
+	e.u.AddParticle.Angle = RAND_DOUBLE(0, MPI * 2);
 	e.u.AddParticle.DZ = (rand() % 6) + 6;
 	e.u.AddParticle.Spin = RAND_DOUBLE(-0.1, 0.1);
 	GameEventsEnqueue(&gGameEvents, e);
@@ -435,7 +455,7 @@ struct vec2 WeaponClassGetMuzzleOffset(
 	{
 		return svec2_zero();
 	}
-	CASSERT(desc->Pic != NULL, "Gun has no pic");
+	CASSERT(desc->Sprites != NULL, "Gun has no pic");
 	const struct vec2 gunOffset = cs->Offsets.Dir[BODY_PART_GUN][dir];
 	return svec2_add(gunOffset, GetMuzzleOffset(dir));
 }
@@ -448,7 +468,7 @@ static struct vec2 GetMuzzleOffset(const direction_e d)
 
 bool WeaponClassHasMuzzle(const WeaponClass *wc)
 {
-	return wc->Pic != NULL && wc->CanShoot;
+	return wc->Sprites != NULL && wc->CanShoot;
 }
 bool WeaponClassIsHighDPS(const WeaponClass *wc)
 {

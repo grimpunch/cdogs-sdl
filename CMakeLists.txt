@@ -11,9 +11,17 @@ project(cdogs-sdl C)
 
 SET(VERSION_MAJOR "0")
 SET(VERSION_MINOR "6")
-SET(VERSION_PATCH "6")
+SET(VERSION_PATCH "9")
 SET(VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
-CONFIGURE_FILE(${CMAKE_SOURCE_DIR}/appveyor.yml.cmake ${CMAKE_SOURCE_DIR}/appveyor.yml)
+
+# Optionally configure appveyor.yml since it is excluded in source archives
+if(EXISTS ${CMAKE_SOURCE_DIR}/appveyor.yml.cmake)
+	CONFIGURE_FILE(
+		${CMAKE_SOURCE_DIR}/appveyor.yml.cmake
+		${CMAKE_SOURCE_DIR}/appveyor.yml
+	)
+endif()
+
 # this must be 4 numbers
 SET(VERSION_RC "${VERSION_MAJOR},${VERSION_MINOR},${VERSION_PATCH},0")
 SET(WEBSITE "http://cxong.github.io/cdogs-sdl/")
@@ -73,7 +81,14 @@ endif()
 if(NOT "${GCW0}")
 	find_package(OpenGL REQUIRED)
 endif()
+if(NOT "${CCACHE_FOUND}")
+	find_package(CCache)
+endif()
 link_directories(${SDL2_LIBRARY_DIRS} ${SDL2_IMAGE_LIBRARY_DIRS} ${SDL2_MIXER_LIBRARY_DIRS})
+
+if(CCACHE_FOUND AND CLANG)
+	add_definitions(-Qunused-arguments -fcolor-diagnostics)
+endif()
 
 SET(ENet_LIBRARY enet)
 IF(WIN32)
@@ -259,7 +274,7 @@ SET(CPACK_PACKAGE_VERSION_MINOR ${VERSION_MINOR})
 SET(CPACK_PACKAGE_VERSION_PATCH ${VERSION_PATCH})
 SET(CPACK_PACKAGE_EXECUTABLES "cdogs-sdl;C-Dogs SDL;cdogs-sdl-editor;Campaign Editor")
 if(WIN32)
-	SET(CPACK_GENERATOR NSIS)
+	SET(CPACK_GENERATOR NSIS ZIP)
 	SET(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 	SET(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/doc/COPYING.GPL)
 	set(CPACK_PACKAGE_INSTALL_DIRECTORY "C-Dogs SDL")

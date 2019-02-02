@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2014, 2016 Cong Xu
+    Copyright (c) 2013-2014, 2016, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -80,13 +80,15 @@ color_t colorExit = { 255, 255, 255, 255 };
 
 
 
-static void DisplayPlayer(const TActor *player, struct vec2i pos, const int scale)
+static void DisplayPlayer(
+	SDL_Renderer *renderer, const TActor *player, struct vec2i pos,
+	const int scale)
 {
-	const struct vec2i playerPos = Vec2ToTile(player->tileItem.Pos);
+	const struct vec2i playerPos = Vec2ToTile(player->thing.Pos);
 	pos = svec2i_add(pos, svec2i_scale(playerPos, (float)scale));
 	if (scale >= 2)
 	{
-		DrawHead(ActorGetCharacter(player), DIRECTION_DOWN, pos);
+		DrawHead(renderer, ActorGetCharacter(player), DIRECTION_DOWN, pos);
 	}
 	else
 	{
@@ -95,7 +97,7 @@ static void DisplayPlayer(const TActor *player, struct vec2i pos, const int scal
 }
 
 static void DisplayObjective(
-	TTileItem *t, int objectiveIndex, struct vec2i pos, int scale, int flags)
+	Thing *t, int objectiveIndex, struct vec2i pos, int scale, int flags)
 {
 	const struct vec2i objectivePos = Vec2ToTile(t->Pos);
 	const Objective *o =
@@ -190,7 +192,7 @@ color_t DoorColor(int x, int y)
 	}
 }
 
-void DrawDot(TTileItem *t, color_t color, struct vec2i pos, int scale)
+void DrawDot(Thing *t, color_t color, struct vec2i pos, int scale)
 {
 	const struct vec2i dotPos = Vec2ToTile(t->Pos);
 	pos = svec2i_add(pos, svec2i_scale(dotPos, (float)scale));
@@ -213,7 +215,7 @@ static void DrawMap(
 			for (x = 0; x < gMap.Size.x; x++)
 			{
 				Tile *tile = MapGetTile(map, svec2i(x, y));
-				if (!(tile->flags & MAPTILE_IS_NOTHING) &&
+				if (tile->Class->Pic != NULL &&
 					(tile->isVisited || (flags & AUTOMAP_FLAGS_SHOWALL)))
 				{
 					int j;
@@ -222,20 +224,24 @@ static void DrawMap(
 						struct vec2i drawPos = svec2i(
 							mapPos.x + x*scale + j,
 							mapPos.y + y*scale + i);
-						color_t color = colorRoom;
-						if (tile->flags & MAPTILE_IS_WALL)
+						color_t color = colorTransparent;
+						switch (tile->Class->Type)
 						{
-							color = colorWall;
+							case TILE_CLASS_WALL:
+								color = colorWall;
+								break;
+							case TILE_CLASS_DOOR:
+								color = DoorColor(x, y);
+								break;
+							case TILE_CLASS_FLOOR:
+								color = tile->Class->IsRoom ?
+									colorRoom : colorFloor;
+								break;
+							default:
+								CASSERT(false, "Unknown tile class type");
+								break;
 						}
-						else if (tile->flags & MAPTILE_NO_WALK)
-						{
-							color = DoorColor(x, y);
-						}
-						else if (tile->flags & MAPTILE_IS_NORMAL_FLOOR)
-						{
-							color = colorFloor;
-						}
-						if (!ColorEquals(color, colorBlack))
+						if (!ColorEquals(color, colorTransparent))
 						{
 							if (flags & AUTOMAP_FLAGS_MASK)
 							{
@@ -259,8 +265,8 @@ static void DrawMap(
 	}
 }
 
-static void DrawTileItem(
-	TTileItem *t, Tile *tile, struct vec2i pos, int scale, int flags);
+static void DrawThing(
+	Thing *t, Tile *tile, struct vec2i pos, int scale, int flags);
 static void DrawObjectivesAndKeys(Map *map, struct vec2i pos, int scale, int flags)
 {
 	for (int y = 0; y < map->Size.y; y++)
@@ -269,18 +275,18 @@ static void DrawObjectivesAndKeys(Map *map, struct vec2i pos, int scale, int fla
 		{
 			Tile *tile = MapGetTile(map, svec2i(x, y));
 			CA_FOREACH(ThingId, tid, tile->things)
-				DrawTileItem(
-					ThingIdGetTileItem(tid), tile, pos, scale, flags);
+				DrawThing(
+					ThingIdGetThing(tid), tile, pos, scale, flags);
 			CA_FOREACH_END()
 		}
 	}
 }
-static void DrawTileItem(
-	TTileItem *t, Tile *tile, struct vec2i pos, int scale, int flags)
+static void DrawThing(
+	Thing *t, Tile *tile, struct vec2i pos, int scale, int flags)
 {
-	if ((t->flags & TILEITEM_OBJECTIVE) != 0)
+	if ((t->flags & THING_OBJECTIVE) != 0)
 	{
-		const int obj = ObjectiveFromTileItem(t->flags);
+		const int obj = ObjectiveFromThing(t->flags);
 		const Objective *o =
 			CArrayGet(&gMission.missionData->Objectives, obj);
 		if (!(o->Flags & OBJECTIVE_HIDDEN) || (flags & AUTOMAP_FLAGS_SHOWALL))
@@ -322,7 +328,7 @@ static void DrawTileItem(
 	}
 }
 
-void AutomapDraw(int flags, bool showExit)
+void AutomapDraw(SDL_Renderer *renderer, const int flags, const bool showExit)
 {
 	color_t mask = { 0, 128, 0, 255 };
 	struct vec2i mapCenter = svec2i(
@@ -348,7 +354,7 @@ void AutomapDraw(int flags, bool showExit)
 		{
 			continue;
 		}
-		DisplayPlayer(ActorGetByUID(p->ActorUID), pos, MAP_FACTOR);
+		DisplayPlayer(renderer, ActorGetByUID(p->ActorUID), pos, MAP_FACTOR);
 	CA_FOREACH_END()
 
 	if (showExit)
@@ -359,8 +365,9 @@ void AutomapDraw(int flags, bool showExit)
 }
 
 void AutomapDrawRegion(
-	Map *map,
-	struct vec2i pos, struct vec2i size, struct vec2i mapCenter, int flags, bool showExit)
+	SDL_Renderer *renderer, Map *map,
+	struct vec2i pos, const struct vec2i size, const struct vec2i mapCenter,
+	const int flags, const bool showExit)
 {
 	const int scale = 1;
 	const BlitClipping oldClip = gGraphicsDevice.clipping;
@@ -377,7 +384,7 @@ void AutomapDrawRegion(
 			continue;
 		}
 		const TActor *player = ActorGetByUID(p->ActorUID);
-		DisplayPlayer(player, centerOn, scale);
+		DisplayPlayer(renderer, player, centerOn, scale);
 	CA_FOREACH_END()
 	DrawObjectivesAndKeys(&gMap, centerOn, scale, flags);
 	if (showExit)

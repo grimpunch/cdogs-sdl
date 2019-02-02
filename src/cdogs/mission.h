@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2017, Cong Xu
+    Copyright (c) 2013-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -51,12 +51,14 @@
 #include <stdbool.h>
 
 #include "config.h"
+#include "map_object.h"
+#include "mission_static.h"
 #include "objective.h"
 #include "proto/msg.pb.h"
 #include "sys_config.h"
 
-#define ObjectiveFromTileItem(f) ((((f) & TILEITEM_OBJECTIVE) >> OBJECTIVE_SHIFT)-1)
-#define ObjectiveToTileItem(o)   (((o)+1) << OBJECTIVE_SHIFT)
+#define ObjectiveFromThing(f) ((((f) & THING_OBJECTIVE) >> OBJECTIVE_SHIFT)-1)
+#define ObjectiveToThing(o)   (((o)+1) << OBJECTIVE_SHIFT)
 
 #define KEY_COUNT 4
 
@@ -169,21 +171,7 @@ typedef struct
 				int Max;
 			} Pillars;
 		} Classic;
-		// Static
-		struct
-		{
-			CArray Tiles;		// of unsigned short (map tile)
-			CArray Items;		// of MapObjectPositions
-			CArray Characters;	// of CharacterPositions
-			CArray Objectives;	// of ObjectivePositions
-			CArray Keys;		// of KeyPositions
-			struct vec2i Start;
-			struct
-			{
-				struct vec2i Start;
-				struct vec2i End;
-			} Exit;
-		} Static;
+		MissionStatic Static;
 		// Cave
 		struct
 		{
@@ -224,6 +212,7 @@ struct MissionOptions
 	bool isDone;
 	int DoneCounter;
 	bool IsQuit;
+	bool HasPlayedCompleteSound;
 };
 
 void MissionInit(Mission *m);

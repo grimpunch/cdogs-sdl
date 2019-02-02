@@ -2,7 +2,7 @@
  C-Dogs SDL
  A port of the legendary (and fun) action/arcade cdogs.
  
- Copyright (c) 2013-2017 Cong Xu
+ Copyright (c) 2013-2018 Cong Xu
  All rights reserved.
  
  Redistribution and use in source and binary forms, with or without
@@ -62,7 +62,7 @@ void AddStringPair(json_t *parent, const char *name, const char *s)
 }
 void AddColorPair(json_t *parent, const char *name, const color_t c)
 {
-	char buf[8];
+	char buf[16];
 	ColorStr(buf, c);
 	AddStringPair(parent, name, buf);
 }
@@ -156,7 +156,7 @@ void LoadStr(char **value, json_t *node, const char *name)
 	}
 	*value = json_unescape(node->text);
 }
-char *GetString(json_t *node, const char *name)
+char *GetString(const json_t *node, const char *name)
 {
 	return json_unescape(json_find_first_label(node, name)->child->text);
 }

@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2013-2016, 2018 Cong Xu
+    Copyright (c) 2013-2016, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -46,6 +46,18 @@ PicType StrPicType(const char *s)
 }
 
 
+CPicDrawContext CPicDrawContextNew(void)
+{
+	CPicDrawContext c;
+	c.Dir = DIRECTION_UP;
+	c.Offset = svec2i_zero();
+	c.Radians = 0;
+	c.Scale = svec2_one();
+	c.Mask = colorWhite;
+	return c;
+}
+
+
 void NamedPicFree(NamedPic *n)
 {
 	PicFree(&n->pic);
@@ -72,7 +84,7 @@ void NamedSpritesFree(NamedSprites *ns)
 	CArrayTerminate(&ns->pics);
 }
 
-static void LoadNormal(CPic *p, json_t *node);
+static void LoadNormal(CPic *p, const json_t *node);
 static void LoadMaskTint(CPic *p, json_t *node);
 
 void CPicLoadJSON(CPic *p, json_t *node)
@@ -121,14 +133,27 @@ bail:
 	return;
 }
 
-void CPicLoadNormal(CPic *p, json_t *node)
+void CPicInitNormal(CPic *p, const Pic *pic)
+{
+	p->Type = PICTYPE_NORMAL;
+	p->u.Pic = pic;
+	p->Mask = colorWhite;
+}
+void CPicInitNormalFromName(CPic *p, const char *name)
+{
+	p->Type = PICTYPE_NORMAL;
+	p->u.Pic = PicManagerGetPic(&gPicManager, name);
+	p->Mask = colorWhite;
+}
+
+void CPicLoadNormal(CPic *p, const json_t *node)
 {
 	p->Type = PICTYPE_NORMAL;
 	LoadNormal(p, node);
 	p->Mask = colorWhite;
 }
 
-static void LoadNormal(CPic *p, json_t *node)
+static void LoadNormal(CPic *p, const json_t *node)
 {
 	char *tmp = json_unescape(node->text);
 	p->u.Pic = PicManagerGetPic(&gPicManager, tmp);
@@ -146,6 +171,9 @@ static void LoadMaskTint(CPic *p, json_t *node)
 	}
 	else if (json_find_first_label(node, "Tint"))
 	{
+		// TODO: create new pic, as tinting does not work correctly using mask
+		// Mask only darkens, whereas tinting can change hue without affecting
+		// value, for example
 		json_t *tint = json_find_first_label(node, "Tint")->child->child;
 		HSV hsv;
 		hsv.h = atof(tint->text);
@@ -188,6 +216,11 @@ struct vec2i CPicGetSize(const CPic *p)
 void CPicCopyPic(CPic *dest, const CPic *src)
 {
 	memcpy(dest, src, sizeof *src);
+	if (dest->Type == PICTYPE_ANIMATED_RANDOM)
+	{
+		// initialise frame with a random value
+		dest->u.Animated.Frame = rand() % (int)dest->u.Animated.Sprites->size;
+	}
 }
 
 void CPicUpdate(CPic *p, const int ticks)
@@ -237,7 +270,7 @@ const Pic *CPicGetPic(const CPic *p, const int idx)
 	case PICTYPE_NORMAL:
 		return p->u.Pic;
 	case PICTYPE_DIRECTIONAL:
-		return CArrayGet(p->u.Sprites, idx);
+		return p->u.Sprites != NULL ? CArrayGet(p->u.Sprites, idx) : NULL;
 	case PICTYPE_ANIMATED:
 	case PICTYPE_ANIMATED_RANDOM:
 		if (p->u.Animated.Frame < 0 ||
@@ -261,5 +294,8 @@ void CPicDraw(
 		return;
 	}
 	const struct vec2i picPos = svec2i_add(pos, context->Offset);
-	PicRender(pic, g->gameWindow.renderer, picPos, p->Mask);
+	PicRender(
+		pic, g->gameWindow.renderer, picPos,ColorMult(p->Mask, context->Mask),
+		context->Radians,
+		context->Scale);
 }

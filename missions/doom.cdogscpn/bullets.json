@@ -15,7 +15,11 @@
         "Type": "Directional",
         "Sprites": "9mm"
       },
-      "OutOfRangeSpark": "spark",
+      "Trail": {
+        "Particle": "trail",
+        "Width": 1.0
+      },
+      "WallMark": "bullet_hole",
       "Speed": 35000,
       "Range": 1,
       "Power": 10,
@@ -27,7 +31,11 @@
         "Type": "Normal",
         "Pic": ""
       },
-      "OutOfRangeSpark": "spark",
+      "Trail": {
+        "Particle": "trail",
+        "Width": 1.0
+      },
+      "WallMark": "bullet_hole",
       "Speed": 25000,
       "Range": 1,
       "Power": 10,

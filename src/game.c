@@ -62,10 +62,12 @@
 #include <cdogs/handle_game_events.h>
 #include <cdogs/log.h>
 #include <cdogs/los.h>
+#include <cdogs/map_build.h>
 #include <cdogs/music.h>
 #include <cdogs/net_client.h>
 #include <cdogs/net_server.h>
 #include <cdogs/objs.h>
+#include <cdogs/pickup.h>
 
 #include "briefing_screens.h"
 #include "hiscores.h"
@@ -117,7 +119,7 @@ struct vec2i GetPlayerCenter(
 		const struct vec2i screenCenter =
 			svec2i(w / 2, device->cachedConfig.Res.y / 2);
 		const TActor *actor = ActorGetByUID(pData->ActorUID);
-		const struct vec2 p = actor->tileItem.Pos;
+		const struct vec2 p = actor->thing.Pos;
 		center = svec2i_add(
 			svec2i_assign_vec2(svec2_subtract(p, pCenter)), screenCenter);
 	}
@@ -178,8 +180,18 @@ GameLoopData *RunGame(
 		data, RunGameTerminate, RunGameOnEnter, RunGameOnExit,
 		RunGameInput, RunGameUpdate, RunGameDraw);
 	g->FPS = ConfigGetInt(&gConfig, "Game.FPS");
+	g->SuperhotMode = ConfigGetBool(&gConfig, "Game.Superhot(tm)Mode");
 	g->InputEverySecondFrame = true;
 	return g;
+}
+static void RunGameReset(RunGameData *rData)
+{
+	// Clear the background
+	DrawRectangle(
+		&gGraphicsDevice, svec2i_zero(), gGraphicsDevice.cachedConfig.Res,
+		colorBlack, 0);
+	BlitUpdateFromBuf(&gGraphicsDevice, gGraphicsDevice.bkg);
+	CameraReset(&rData->Camera);
 }
 static void RunGameTerminate(GameLoopData *data)
 {
@@ -191,13 +203,9 @@ static void RunGameOnEnter(GameLoopData *data)
 {
 	RunGameData *rData = data->Data;
 
-	// Clear the background
-	DrawRectangle(
-		&gGraphicsDevice, svec2i_zero(), gGraphicsDevice.cachedConfig.Res,
-		colorBlack, 0);
-	BlitUpdateFromBuf(&gGraphicsDevice, gGraphicsDevice.bkg);
+	RunGameReset(rData);
 
-	MapLoad(rData->map, rData->m, rData->co);
+	MapBuild(rData->map, rData->m->missionData, rData->co);
 
 	// Seed random if PVP mode (otherwise players will always spawn in same
 	// position)
@@ -208,8 +216,6 @@ static void RunGameOnEnter(GameLoopData *data)
 
 	if (!rData->co->IsClient)
 	{
-		MapLoadDynamic(rData->map, rData->m, &rData->co->Setting.characters);
-
 		// For PVP modes, mark all map as explored
 		if (IsPVP(rData->co->Entry.Mode))
 		{
@@ -392,13 +398,19 @@ static void RunGameInput(GameLoopData *data)
 		}
 	CA_FOREACH_END()
 
+	// If in Superhot(tm) Mode, don't update unless there was an input in this
+	// or the last frame
+	data->SkipNextFrame = data->SuperhotMode && !lastCmdAll;
+
 	// Check if:
 	// - escape was pressed, or
 	// - window lost focus
 	// - controller unplugged
+	// If the game is paused, unpause if a button is released
 	// If the game was not paused, enter pause mode
 	// If the game was paused and escape was pressed, exit the game
-	if (AnyButton(cmdAll))
+	if (rData->pausingDevice != INPUT_DEVICE_UNSET
+	    && AnyButton(lastCmdAll) && !AnyButton(cmdAll))
 	{
 		rData->pausingDevice = INPUT_DEVICE_UNSET;
 	}
@@ -419,6 +431,8 @@ static void RunGameInput(GameLoopData *data)
 			// Need to unpause to process the quit
 			rData->pausingDevice = INPUT_DEVICE_UNSET;
 			rData->controllerUnplugged = false;
+			// Don't skip exiting the game
+			data->SkipNextFrame = false;
 		}
 		else
 		{
@@ -495,6 +509,11 @@ static GameLoopResult RunGameUpdate(GameLoopData *data, LoopRunner *l)
 		return UPDATE_RESULT_DRAW;
 	}
 
+	if (data->SkipNextFrame)
+	{
+		return UPDATE_RESULT_DRAW;
+	}
+
 	// Update all the things in the game
 	const int ticksPerFrame = 1;
 
@@ -509,7 +528,7 @@ static GameLoopResult RunGameUpdate(GameLoopData *data, LoopRunner *l)
 			if (player->dead > DEATH_MAX) continue;
 			// Calculate LOS for all players alive or dying
 			LOSCalcFrom(
-				&gMap, Vec2ToTile(player->tileItem.Pos), !gCampaign.IsClient);
+				&gMap, Vec2ToTile(player->thing.Pos), !gCampaign.IsClient);
 
 			if (player->dead) continue;
 
@@ -561,23 +580,23 @@ static GameLoopResult RunGameUpdate(GameLoopData *data, LoopRunner *l)
 			const TActor *p = ActorGetByUID(pd->ActorUID);
 			const int pad = CAMERA_SPLIT_PADDING;
 			struct vec2 vel = svec2_zero();
-			if (screen.x + pad > p->tileItem.Pos.x && p->tileItem.Vel.x < 1)
+			if (screen.x + pad > p->thing.Pos.x && p->thing.Vel.x < 1)
 			{
-				vel.x = screen.x + pad - p->tileItem.Pos.x;
+				vel.x = screen.x + pad - p->thing.Pos.x;
 			}
-			else if (screen.x + w - pad < p->tileItem.Pos.x &&
-				p->tileItem.Vel.x > -1)
+			else if (screen.x + w - pad < p->thing.Pos.x &&
+				p->thing.Vel.x > -1)
 			{
-				vel.x = screen.x + w - pad - p->tileItem.Pos.x;
+				vel.x = screen.x + w - pad - p->thing.Pos.x;
 			}
-			if (screen.y + pad > p->tileItem.Pos.y && p->tileItem.Vel.y < 1)
+			if (screen.y + pad > p->thing.Pos.y && p->thing.Vel.y < 1)
 			{
-				vel.y = screen.y + pad - p->tileItem.Pos.y;
+				vel.y = screen.y + pad - p->thing.Pos.y;
 			}
-			else if (screen.y + h - pad < p->tileItem.Pos.y &&
-				p->tileItem.Vel.y > -1)
+			else if (screen.y + h - pad < p->thing.Pos.y &&
+				p->thing.Vel.y > -1)
 			{
-				vel.y = screen.y + h - pad - p->tileItem.Pos.y;
+				vel.y = screen.y + h - pad - p->thing.Pos.y;
 			}
 			if (!svec2_is_zero(vel))
 			{
@@ -588,7 +607,7 @@ static GameLoopResult RunGameUpdate(GameLoopData *data, LoopRunner *l)
 				GameEventsEnqueue(&gGameEvents, ei);
 				LOG(LM_MAIN, LL_TRACE,
 					"playerUID(%d) pos(%f, %f) screen(%d, %d) impulse(%f, %f)",
-					p->uid, p->tileItem.Pos.x, p->tileItem.Pos.y,
+					p->uid, p->thing.Pos.x, p->thing.Pos.y,
 					screen.x, screen.y,
 					ei.u.ActorImpulse.Vel.x, ei.u.ActorImpulse.Vel.y);
 			}
@@ -598,6 +617,7 @@ static GameLoopResult RunGameUpdate(GameLoopData *data, LoopRunner *l)
 	UpdateAllActors(ticksPerFrame);
 	UpdateObjects(ticksPerFrame);
 	UpdateMobileObjects(ticksPerFrame);
+	PickupsUpdate(&gPickups, ticksPerFrame);
 	ParticlesUpdate(&gParticles, ticksPerFrame);
 
 	UpdateWatches(&rData->map->triggers, ticksPerFrame);
@@ -624,6 +644,10 @@ static GameLoopResult RunGameUpdate(GameLoopData *data, LoopRunner *l)
 
 	rData->m->time += ticksPerFrame;
 
+	if (gEventHandlers.HasResolutionChanged)
+	{
+		RunGameReset(rData);
+	}
 	CameraUpdate(&rData->Camera, ticksPerFrame, 1000 / data->FPS);
 
 	return UPDATE_RESULT_DRAW;
@@ -741,7 +765,9 @@ static void RunGameDraw(GameLoopData *data)
 	// Draw automap if enabled
 	if (rData->isMap)
 	{
-		AutomapDraw(0, rData->Camera.HUD.showExit);
+		AutomapDraw(
+			gGraphicsDevice.gameWindow.renderer, 0,
+			rData->Camera.HUD.showExit);
 	}
 	BlitUpdateFromBuf(&gGraphicsDevice, gGraphicsDevice.hud);
 
@@ -750,7 +776,9 @@ static void RunGameDraw(GameLoopData *data)
 		BlitClearBuf(&gGraphicsDevice);
 		if (IsAutoMapEnabled(gCampaign.Entry.Mode))
 		{
-			AutomapDraw(0, rData->Camera.HUD.showExit);
+			AutomapDraw(
+				gGraphicsDevice.secondWindow.renderer, 0,
+				rData->Camera.HUD.showExit);
 		}
 		BlitUpdateFromBuf(&gGraphicsDevice, gGraphicsDevice.hud2);
 	}

@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2014-2015, 2017 Cong Xu
+    Copyright (c) 2014-2015, 2017-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -30,7 +30,7 @@
 #include <json/json.h>
 
 #include "pic.h"
-#include "tile.h"
+#include "thing.h"
 
 typedef enum
 {
@@ -48,7 +48,6 @@ typedef struct
 		CPic Pic;
 		color_t TextColor;
 	} u;
-	const NamedSprites *Sprites;
 	// -1 is infinite range
 	int RangeLow;
 	int RangeHigh;
@@ -56,6 +55,7 @@ typedef struct
 	bool HitsWalls;
 	bool Bounces;
 	bool WallBounces;
+	bool ZDarken;	// darken as the particle falls to the ground
 } ParticleClass;
 typedef struct
 {
@@ -79,7 +79,7 @@ typedef struct
 	double Spin;
 	int Count;
 	int Range;
-	TTileItem tileItem;
+	Thing thing;
 	bool isInUse;
 } Particle;
 extern CArray gParticles;	// of Particle
@@ -93,6 +93,7 @@ typedef struct
 	double Angle;
 	int DZ;
 	double Spin;
+	struct vec2 DrawScale;
 	char Text[128];
 } AddParticle;
 

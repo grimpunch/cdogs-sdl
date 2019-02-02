@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2014, Cong Xu
+    Copyright (c) 2014, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -25,13 +25,10 @@
     ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
     POSSIBILITY OF SUCH DAMAGE.
 */
-#ifndef __MAP_STATIC
-#define __MAP_STATIC
+#pragma once
 
-#include "map.h"
+#include "map_build.h"
 
-void MapStaticLoad(Map *map, const struct MissionOptions *mo);
-void MapStaticLoadDynamic(
-	Map *map, const struct MissionOptions *mo, const CharacterStore *store);
-
-#endif
+void MapStaticLoad(MapBuilder *mb);
+void MapStaticLoadTile(MapBuilder *mb, const struct vec2i v);
+void MapStaticLoadDynamic(MapBuilder *mb);

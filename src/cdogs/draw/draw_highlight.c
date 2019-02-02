@@ -54,7 +54,7 @@
 
 
 static void DrawObjectiveHighlight(
-	TTileItem *ti, Tile *tile, DrawBuffer *b, struct vec2i offset);
+	Thing *ti, Tile *tile, DrawBuffer *b, struct vec2i offset);
 void DrawObjectiveHighlights(DrawBuffer *b, const struct vec2i offset)
 {
 	if (!ConfigGetBool(&gConfig, "Graphics.ShowHUD"))
@@ -69,7 +69,7 @@ void DrawObjectiveHighlights(DrawBuffer *b, const struct vec2i offset)
 		{
 			// Draw the items that are in LOS
 			CA_FOREACH(ThingId, tid, tile->things)
-				TTileItem *ti = ThingIdGetTileItem(tid);
+				Thing *ti = ThingIdGetThing(tid);
 				DrawObjectiveHighlight(ti, tile, b, offset);
 			CA_FOREACH_END()
 		}
@@ -77,21 +77,20 @@ void DrawObjectiveHighlights(DrawBuffer *b, const struct vec2i offset)
 	}
 }
 static void DrawObjectiveHighlight(
-	TTileItem *ti, Tile *tile, DrawBuffer *b, struct vec2i offset)
+	Thing *ti, Tile *tile, DrawBuffer *b, struct vec2i offset)
 {
 	color_t color;
-	if (ti->flags & TILEITEM_OBJECTIVE)
+	if (ti->flags & THING_OBJECTIVE)
 	{
 		// Objective
-		const int objective = ObjectiveFromTileItem(ti->flags);
+		const int objective = ObjectiveFromThing(ti->flags);
 		const Objective *o =
 			CArrayGet(&gMission.missionData->Objectives, objective);
 		if (o->Flags & OBJECTIVE_HIDDEN)
 		{
 			return;
 		}
-		if (!(o->Flags & OBJECTIVE_POSKNOWN) &&
-			(tile->flags & MAPTILE_OUT_OF_SIGHT))
+		if (!(o->Flags & OBJECTIVE_POSKNOWN) && tile->outOfSight)
 		{
 			return;
 		}
@@ -115,22 +114,8 @@ static void DrawObjectiveHighlight(
 	const struct vec2i pos = svec2i(
 		(int)ti->Pos.x - b->xTop + offset.x,
 		(int)ti->Pos.y - b->yTop + offset.y);
-	const int pulsePeriod = ConfigGetInt(&gConfig, "Game.FPS");
-	int alphaUnscaled =
-		(gMission.time % pulsePeriod) * 255 / (pulsePeriod / 2);
-	if (alphaUnscaled > 255)
-	{
-		alphaUnscaled = 255 * 2 - alphaUnscaled;
-	}
-	color.a = (Uint8)alphaUnscaled;
-	if (ti->getPicFunc != NULL)
-	{
-		struct vec2i picOffset;
-		const Pic *pic = ti->getPicFunc(ti->id, &picOffset);
-		BlitPicHighlight(
-			&gGraphicsDevice, pic, svec2i_add(pos, picOffset), color);
-	}
-	else if (ti->kind == KIND_CHARACTER)
+	color.a = (Uint8)Pulse256(gMission.time);
+	if (ti->kind == KIND_CHARACTER)
 	{
 		TActor *a = CArrayGet(&gActors, ti->id);
 		ActorPics pics = GetCharacterPicsFromActor(a);

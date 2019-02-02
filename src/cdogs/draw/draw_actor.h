@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2014, 2016-2018 Cong Xu
+    Copyright (c) 2013-2014, 2016-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -66,32 +66,34 @@ typedef struct
 	// In draw order
 	const Pic *OrderedPics[BODY_PART_COUNT];
 	struct vec2i OrderedOffsets[BODY_PART_COUNT];
-	const CharColors *Colors;
 	bool IsDead;
 	bool IsDying;
-	bool IsTransparent;
-	HSV *Tint;
-	color_t *Mask;
+	bool HasShadow;
+	color_t Mask;
 	const CharSprites *Sprites;
 } ActorPics;
 
 void DrawCharacterSimple(
-	Character *c, const struct vec2i pos, const direction_e d,
-	const bool hilite, const bool showGun);
-void DrawHead(const Character *c, const direction_e dir, const struct vec2i pos);
+	const Character *c, const struct vec2i pos, const direction_e d,
+	const bool hilite, const bool showGun, const bool blit);
+void DrawHead(
+	SDL_Renderer *renderer, const Character *c, const direction_e dir,
+	const struct vec2i pos);
 
 void DrawChatters(DrawBuffer *b, const struct vec2i offset);
 
 const Pic *GetHeadPic(
-	const CharacterClass *c, const direction_e dir, const gunstate_e gunState);
+	const CharacterClass *c, const direction_e dir, const gunstate_e gunState,
+	const CharColors *colors);
 ActorPics GetCharacterPics(
-	Character *c, const direction_e dir,
+	const Character *c, const direction_e dir, const direction_e legDir,
 	const ActorAnimation anim, const int frame,
-	const NamedSprites *gunPics, const gunstate_e gunState,
-	const bool isTransparent, HSV *tint, color_t *mask,
+	const char *gunSprites, const gunstate_e gunState,
+	const bool hasShadow, const color_t *mask, const CharColors *colors,
 	const int deadPic);
 ActorPics GetCharacterPicsFromActor(TActor *a);
-void DrawActorPics(const ActorPics *pics, const struct vec2i pos);
+void DrawActorPics(
+	const ActorPics *pics, const struct vec2i pos, const bool blit);
 void DrawLaserSight(
 	const ActorPics *pics, const TActor *a, const struct vec2i picPos);
 void DrawActorHighlight(

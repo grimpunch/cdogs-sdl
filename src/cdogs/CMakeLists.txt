@@ -96,7 +96,9 @@ set(CDOGS_SOURCES
 	screen_shake.c
 	sounds.c
 	texture.c
+	thing.c
 	tile.c
+	tile_class.c
 	triggers.c
 	utils.c
 	vector.c
@@ -175,6 +177,7 @@ set(CDOGS_HEADERS
 	mathc/mathc.h
 	mission.h
 	mission_convert.h
+	mission_static.h
 	mouse.h
 	music.h
 	net_client.h
@@ -199,7 +202,9 @@ set(CDOGS_HEADERS
 	sys_config.h
 	sys_specifics.h
 	texture.h
+	thing.h
 	tile.h
+	tile_class.h
 	triggers.h
 	utils.h
 	vector.h

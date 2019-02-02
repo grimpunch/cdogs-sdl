@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2016, Cong Xu
+    Copyright (c) 2013-2016, 2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -86,7 +86,7 @@ static TileLOS GetTileLOS(const Tile *tile, const bool useFog)
 	{
 		return TILE_LOS_NONE;
 	}
-	if (tile->flags & MAPTILE_OUT_OF_SIGHT)
+	if (tile->outOfSight)
 	{
 		return useFog ? TILE_LOS_FOG : TILE_LOS_NONE;
 	}
@@ -112,18 +112,9 @@ static void DrawLOSPic(
 	}
 	if (pic != NULL)
 	{
-		PicRender(pic, gGraphicsDevice.gameWindow.renderer, pos, mask);
-	}
-}
-void DrawWallColumn(int y, struct vec2i pos, Tile *tile)
-{
-	const bool useFog = ConfigGetBool(&gConfig, "Game.Fog");
-	while (y >= 0 && (tile->flags & MAPTILE_IS_WALL))
-	{
-		DrawLOSPic(tile, &tile->pic->pic, pos, useFog);
-		pos.y -= TILE_HEIGHT;
-		tile -= X_TILES;
-		y--;
+		PicRender(
+			pic, gGraphicsDevice.gameWindow.renderer, pos, mask, 0, svec2_one()
+		);
 	}
 }
 
@@ -166,10 +157,12 @@ static void DrawFloor(DrawBuffer *b, struct vec2i offset)
 			x < b->Size.x;
 			x++, tile++, pos.x += TILE_WIDTH)
 		{
-			if (tile->pic != NULL && tile->pic->pic.Data != NULL &&
-				!(tile->flags & MAPTILE_IS_WALL))
+			if (tile->Class != NULL &&
+				tile->Class->Pic != NULL &&
+				tile->Class->Pic->Data != NULL &&
+				tile->Class->Type != TILE_CLASS_WALL)
 			{
-				DrawLOSPic(tile, &tile->pic->pic, pos, useFog);
+				DrawLOSPic(tile, tile->Class->Pic, pos, useFog);
 			}
 		}
 		tile += X_TILES - b->Size.x;
@@ -177,7 +170,7 @@ static void DrawFloor(DrawBuffer *b, struct vec2i offset)
 }
 
 static void DrawThing(
-	DrawBuffer *b, const TTileItem *t, const struct vec2i offset);
+	DrawBuffer *b, const Thing *t, const struct vec2i offset);
 
 static void DrawDebris(DrawBuffer *b, struct vec2i offset)
 {
@@ -187,20 +180,20 @@ static void DrawDebris(DrawBuffer *b, struct vec2i offset)
 		CArrayClear(&b->displaylist);
 		for (int x = 0; x < b->Size.x; x++, tile++)
 		{
-			if (tile->flags & MAPTILE_OUT_OF_SIGHT)
+			if (tile->outOfSight)
 			{
 				continue;
 			}
 			CA_FOREACH(ThingId, tid, tile->things)
-				const TTileItem *ti = ThingIdGetTileItem(tid);
-				if (TileItemDrawLast(ti))
+				const Thing *ti = ThingIdGetThing(tid);
+				if (ThingDrawLast(ti))
 				{
 					CArrayPushBack(&b->displaylist, &ti);
 				}
 			CA_FOREACH_END()
 		}
 		DrawBufferSortDisplayList(b);
-		CA_FOREACH(const TTileItem *, tp, b->displaylist)
+		CA_FOREACH(const Thing *, tp, b->displaylist)
 			DrawThing(b, *tp, offset);
 		CA_FOREACH_END()
 		tile += X_TILES - b->Size.x;
@@ -220,37 +213,35 @@ static void DrawWallsAndThings(DrawBuffer *b, struct vec2i offset)
 		pos.x = b->dx + offset.x;
 		for (int x = 0; x < b->Size.x; x++, tile++, pos.x += TILE_WIDTH)
 		{
-			if (tile->flags & MAPTILE_IS_WALL)
+			if (tile->Class->Type == TILE_CLASS_WALL)
 			{
-				if (!(tile->flags & MAPTILE_DELAY_DRAW))
-				{
-					DrawWallColumn(y, pos, tile);
-				}
+				DrawLOSPic(tile, tile->Class->Pic, pos, useFog);
 			}
-			else if (tile->flags & MAPTILE_OFFSET_PIC)
+			else if (tile->Class->Type == TILE_CLASS_DOOR &&
+				tile->ClassAlt && tile->ClassAlt->Pic)
 			{
 				// Drawing doors
 				// Doors may be offset; vertical doors are drawn centered
 				// horizontal doors are bottom aligned
 				struct vec2i doorPos = pos;
-				doorPos.x += (TILE_WIDTH - tile->picAlt->pic.size.x) / 2;
-				if (tile->picAlt->pic.size.y > 16)
+				const Pic *pic = tile->ClassAlt->Pic;
+				doorPos.x += (TILE_WIDTH - pic->size.x) / 2;
+				if (pic->size.y > 16)
 				{
-					doorPos.y +=
-						TILE_HEIGHT - (tile->picAlt->pic.size.y % TILE_HEIGHT);
+					doorPos.y += TILE_HEIGHT - (pic->size.y % TILE_HEIGHT);
 				}
-				DrawLOSPic(tile, &tile->picAlt->pic, doorPos, useFog);
+				DrawLOSPic(tile, pic, doorPos, useFog);
 			}
 
 			// Draw the items that are in LOS
-			if (tile->flags & MAPTILE_OUT_OF_SIGHT)
+			if (tile->outOfSight)
 			{
 				continue;
 			}
 			CA_FOREACH(ThingId, tid, tile->things)
-				const TTileItem *ti = ThingIdGetTileItem(tid);
+				const Thing *ti = ThingIdGetThing(tid);
 				// Drawn later
-				if (TileItemDrawLast(ti))
+				if (ThingDrawLast(ti))
 				{
 					continue;
 				}
@@ -258,18 +249,20 @@ static void DrawWallsAndThings(DrawBuffer *b, struct vec2i offset)
 			CA_FOREACH_END()
 		}
 		DrawBufferSortDisplayList(b);
-		CA_FOREACH(const TTileItem *, tp, b->displaylist)
+		CA_FOREACH(const Thing *, tp, b->displaylist)
 			DrawThing(b, *tp, offset);
 		CA_FOREACH_END()
 		tile += X_TILES - b->Size.x;
 	}
 }
 static void DrawThing(
-	DrawBuffer *b, const TTileItem *t, const struct vec2i offset)
+	DrawBuffer *b, const Thing *t, const struct vec2i offset)
 {
-	const struct vec2i picPos = svec2i(
-		(int)t->Pos.x - b->xTop + offset.x,
-		(int)t->Pos.y - b->yTop + offset.y);
+	const struct vec2i picPos = svec2i_add(
+		svec2i_subtract(
+			svec2i_floor(svec2_add(t->Pos, t->drawShake)),
+			svec2i(b->xTop, b->yTop)),
+		offset);
 
 	if (!svec2i_is_zero(t->ShadowSize))
 	{
@@ -280,19 +273,11 @@ static void DrawThing(
 	{
 		t->CPicFunc(b->g, t->id, picPos);
 	}
-	else if (t->getPicFunc)
-	{
-		struct vec2i picOffset;
-		const Pic *pic = t->getPicFunc(t->id, &picOffset);
-		const struct vec2i drawPos = svec2i_add(picPos, picOffset);
-		PicRender(
-			pic, gGraphicsDevice.gameWindow.renderer, drawPos, colorWhite);
-	}
 	else if (t->kind == KIND_CHARACTER)
 	{
 		TActor *a = CArrayGet(&gActors, t->id);
 		ActorPics pics = GetCharacterPicsFromActor(a);
-		DrawActorPics(&pics, picPos);
+		DrawActorPics(&pics, picPos, false);
 		// Draw weapon indicators
 		DrawLaserSight(&pics, a, picPos);
 	}
@@ -389,7 +374,7 @@ static void DrawGuideImage(
 
 // Draw names of objects (objectives, spawners etc.)
 static void DrawObjectiveName(
-	const TTileItem *ti, DrawBuffer *b, const struct vec2i offset);
+	const Thing *ti, DrawBuffer *b, const struct vec2i offset);
 static void DrawSpawnerName(
 	const TObject *obj, DrawBuffer *b, const struct vec2i offset);
 static void DrawObjectNames(DrawBuffer *b, const struct vec2i offset)
@@ -400,8 +385,8 @@ static void DrawObjectNames(DrawBuffer *b, const struct vec2i offset)
 		for (int x = 0; x < b->Size.x; x++, tile++)
 		{
 			CA_FOREACH(ThingId, tid, tile->things)
-				const TTileItem *ti = ThingIdGetTileItem(tid);
-				if (ti->flags & TILEITEM_OBJECTIVE)
+				const Thing *ti = ThingIdGetThing(tid);
+				if (ti->flags & THING_OBJECTIVE)
 				{
 					DrawObjectiveName(ti, b, offset);
 				}
@@ -419,9 +404,9 @@ static void DrawObjectNames(DrawBuffer *b, const struct vec2i offset)
 	}
 }
 static void DrawObjectiveName(
-	const TTileItem *ti, DrawBuffer *b, const struct vec2i offset)
+	const Thing *ti, DrawBuffer *b, const struct vec2i offset)
 {
-	const int objective = ObjectiveFromTileItem(ti->flags);
+	const int objective = ObjectiveFromThing(ti->flags);
 	const Objective *o =
 		CArrayGet(&gMission.missionData->Objectives, objective);
 	const char *typeName = ObjectiveTypeStr(o->Type);
@@ -435,7 +420,7 @@ static void DrawSpawnerName(
 {
 	const char *name = obj->Class->u.PickupClass->Name;
 	const struct vec2i textPos = svec2i(
-		(int)obj->tileItem.Pos.x - b->xTop + offset.x - FontStrW(name) / 2,
-		(int)obj->tileItem.Pos.y - b->yTop + offset.y);
+		(int)obj->thing.Pos.x - b->xTop + offset.x - FontStrW(name) / 2,
+		(int)obj->thing.Pos.y - b->yTop + offset.y);
 	FontStr(name, textPos);
 }

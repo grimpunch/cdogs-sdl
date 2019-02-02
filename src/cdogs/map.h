@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2017 Cong Xu
+    Copyright (c) 2013-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -50,10 +50,10 @@
 
 #include <stdbool.h>
 
-#include "campaigns.h"
 #include "map_object.h"
 #include "mission.h"
 #include "pic.h"
+#include "thing.h"
 #include "tile.h"
 #include "triggers.h"
 #include "vector.h"
@@ -80,8 +80,6 @@ IMapType StrIMapType(const char *s);
 #define MAP_MASKACCESS      0xFF
 #define MAP_ACCESSBITS      0x0F00
 
-#define MAP_LEAVEFREE       4096
-
 typedef struct
 {
 	// Array of bools to set lines of sight
@@ -96,10 +94,8 @@ typedef struct
 	CArray Tiles;	// of Tile
 	struct vec2i Size;
 
-	// internal data structure to help build the map
-	CArray iMap;	// of unsigned short
-
 	LineOfSight LOS;
+	CArray access;	// of uint16_t
 
 	CArray triggers;	// of Trigger *; owner
 	int triggerId;
@@ -115,35 +111,36 @@ typedef struct
 
 extern Map gMap;
 
-unsigned short GetAccessMask(int k);
+uint16_t GetAccessMask(const int k);
 
 Tile *MapGetTile(const Map *map, const struct vec2i pos);
 bool MapIsTileIn(const Map *map, const struct vec2i pos);
-bool MapIsTileInExit(const Map *map, const TTileItem *ti);
+bool MapIsTileInExit(const Map *map, const Thing *ti);
 
+// TODO: remove this function
+uint16_t MapGetAccessLevel(const Map *map, const struct vec2i pos);
+uint16_t AccessCodeToFlags(const uint16_t code);
 bool MapHasLockedRooms(const Map *map);
 bool MapPosIsInLockedRoom(const Map *map, const struct vec2 pos);
 int MapGetDoorKeycardFlag(Map *map, struct vec2i pos);
 
 // Return false if cannot move to new position
-bool MapTryMoveTileItem(Map *map, TTileItem *t, const struct vec2 pos);
-void MapRemoveTileItem(Map *map, TTileItem *t);
+bool MapTryMoveThing(Map *map, Thing *t, const struct vec2 pos);
+void MapRemoveThing(Map *map, Thing *t);
 
 void MapTerminate(Map *map);
-void MapLoad(
-	Map *map, const struct MissionOptions *mo, const CampaignOptions* co);
-void MapLoadDynamic(
-	Map *map, const struct MissionOptions *mo, const CharacterStore *store);
+void MapInit(Map *map, const struct vec2i size);
 bool MapIsPosOKForPlayer(
 	const Map *map, const struct vec2 pos, const bool allowAllTiles);
 bool MapIsTileAreaClear(Map *map, const struct vec2 pos, const struct vec2i size);
-void MapChangeFloor(
-	Map *map, const struct vec2i pos, NamedPic *normal, NamedPic *shadow);
 void MapShowExitArea(Map *map, const struct vec2i exitStart, const struct vec2i exitEnd);
 // Returns the center of the tile that's the middle of the exit area
 struct vec2 MapGetExitPos(const Map *m);
 struct vec2i MapGetRandomTile(const Map *map);
 struct vec2 MapGetRandomPos(const Map *map);
+bool MapPlaceRandomPos(
+	Map *map, const PlacementAccessFlags paFlags,
+	bool (*tryPlaceFunc)(Map *, const struct vec2, void *), void *data);
 
 void MapMarkAsVisited(Map *map, struct vec2i pos);
 void MapMarkAllAsVisited(Map *map);
@@ -155,24 +152,6 @@ struct vec2i MapSearchTileAround(Map *map, struct vec2i start, TileSelectFunc fu
 bool MapTileIsUnexplored(Map *map, struct vec2i tile);
 
 // Map construction functions
-unsigned short IMapGet(const Map *map, const struct vec2i pos);
-void IMapSet(Map *map, struct vec2i pos, unsigned short v);
 struct vec2 MapGenerateFreePosition(Map *map, const struct vec2i size);
-bool MapTryPlaceOneObject(
-	Map *map, const struct vec2i v, const MapObject *mo, const int extraFlags,
-	const bool isStrictMode);
-// TODO: refactor
-void MapPlaceCollectible(
-	const struct MissionOptions *mo, const int objective, const struct vec2 pos);
-// TODO: refactor
-void MapPlaceKey(
-	Map *map, const struct MissionOptions *mo, const struct vec2i tilePos,
-	const int keyIndex);
-bool MapPlaceRandomTile(
-	Map *map, const PlacementAccessFlags paFlags,
-	bool (*tryPlaceFunc)(Map *, const struct vec2i, void *), void *data);
-bool MapPlaceRandomPos(
-	Map *map, const PlacementAccessFlags paFlags,
-	bool (*tryPlaceFunc)(Map *, const struct vec2, void *), void *data);
 
 Trigger *MapNewTrigger(Map *map);

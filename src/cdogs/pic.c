@@ -51,7 +51,8 @@ Uint32 ColorToPixel(
 {
 	const Uint32 pixel = SDL_MapRGBA(f, color.r, color.g, color.b, color.a);
 	// Manually apply the alpha as SDL seems to always set it to 0
-	return (pixel & (f->Rmask | f->Gmask | f->Bmask)) | (color.a << aShift);
+	return (pixel & (f->Rmask | f->Gmask | f->Bmask)) |
+		((Uint32)color.a << aShift);
 }
 
 
@@ -143,7 +144,10 @@ Pic PicCopy(const Pic *src)
 void PicFree(Pic *pic)
 {
 	CFREE(pic->Data);
-	SDL_DestroyTexture(pic->Tex);
+	if (pic->Tex != NULL)
+	{
+		SDL_DestroyTexture(pic->Tex);
+	}
 }
 
 bool PicIsNone(const Pic *pic)
@@ -234,8 +238,19 @@ bool PicPxIsEdge(const Pic *pic, const struct vec2i pos, const bool isPixel)
 }
 
 void PicRender(
-	const Pic *p, SDL_Renderer *r, const struct vec2i pos, const color_t mask)
+	const Pic *p, SDL_Renderer *r, const struct vec2i pos, const color_t mask,
+	const double radians, const struct vec2 scale)
 {
-	const Rect2i dest = Rect2iNew(pos, p->size);
-	TextureRender(p->Tex, r, dest, mask);
+	Rect2i dest = Rect2iNew(pos, p->size);
+	// Apply scale to render dest
+	// TODO: render with anchor at centre by default?
+	if (!svec2_is_equal(scale, svec2_one()))
+	{
+		dest.Pos.x -= (mint_t)MROUND((scale.x - 1) * p->size.x / 2);
+		dest.Pos.y -= (mint_t)MROUND((scale.y - 1) * p->size.y / 2);
+		dest.Size.x = (mint_t)MROUND(p->size.x * scale.x);
+		dest.Size.y = (mint_t)MROUND(p->size.y * scale.y);
+	}
+	const double angle = ToDegrees(radians);
+	TextureRender(p->Tex, r, dest, mask, angle);
 }

@@ -38,14 +38,14 @@
 // Display a character and the player name above it, with the character
 // centered around the target position
 void DisplayCharacterAndName(
-	struct vec2i pos, Character *c, const direction_e d,
+	struct vec2i pos, const Character *c, const direction_e d,
 	const char *name, const color_t color)
 {
 	// Move the point down a bit since the default character draw point is at
 	// its feet
 	pos.y += 8;
 	struct vec2i namePos = svec2i_add(pos, svec2i(-FontStrW(name) / 2, -30));
-	DrawCharacterSimple(c, pos, d, false, false);
+	DrawCharacterSimple(c, pos, d, false, false, false);
 	FontStrMask(name, namePos, color);
 }
 

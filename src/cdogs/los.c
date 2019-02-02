@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2013-2016, Cong Xu
+    Copyright (c) 2013-2016, 2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -33,14 +33,14 @@
 #include "net_util.h"
 
 
-void LOSInit(Map *map, const struct vec2i size)
+void LOSInit(Map *map)
 {
 	CArrayInit(&map->LOS.LOS, sizeof(bool));
 	CArrayInit(&map->LOS.Explored, sizeof(bool));
 	struct vec2i v;
-	for (v.y = 0; v.y < size.y; v.y++)
+	for (v.y = 0; v.y < map->Size.y; v.y++)
 	{
-		for (v.x = 0; v.x < size.x; v.x++)
+		for (v.x = 0; v.x < map->Size.x; v.x++)
 		{
 			const bool f = false;
 			CArrayPushBack(&map->LOS.LOS, &f);
@@ -151,7 +151,7 @@ void LOSCalcFrom(Map *map, const struct vec2i pos, const bool explore)
 		for (end.x = origin.x; end.x < origin.x + perimSize.x; end.x++)
 		{
 			const Tile *tile = MapGetTile(map, end);
-			if (!tile || !(tile->flags & MAPTILE_NO_SEE))
+			if (!tile || !TileIsOpaque(tile))
 			{
 				continue;
 			}
@@ -203,7 +203,7 @@ static void SetLOSVisible(Map *map, const struct vec2i pos, const bool explore)
 	// Mark any actors on this tile as visible
 	// This affects some AI
 	CA_FOREACH(ThingId, tid, t->things)
-		const TTileItem *ti = ThingIdGetTileItem(tid);
+		const Thing *ti = ThingIdGetThing(tid);
 		if (ti->kind == KIND_CHARACTER)
 		{
 			TActor *a = CArrayGet(&gActors, ti->id);
@@ -221,7 +221,7 @@ static bool IsNextTileBlockedAndSetVisibility(void *data, struct vec2i pos)
 	if (t == NULL) return true;
 	SetLOSVisible(lData->Map, pos, lData->Explore);
 	// Check if this tile is an obstruction
-	return t->flags & MAPTILE_NO_SEE;
+	return TileIsOpaque(t);
 }
 static bool IsTileVisibleNonObstruction(Map *map, const struct vec2i pos);
 static void SetObstructionVisible(
@@ -244,7 +244,7 @@ static bool IsTileVisibleNonObstruction(Map *map, const struct vec2i pos)
 {
 	const Tile *t = MapGetTile(map, pos);
 	if (t == NULL) return false;
-	return !(t->flags & MAPTILE_NO_SEE) && LOSTileIsVisible(map, pos);
+	return !TileIsOpaque(t) && LOSTileIsVisible(map, pos);
 }
 
 bool LOSAddRun(

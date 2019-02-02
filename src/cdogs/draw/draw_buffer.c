@@ -64,13 +64,16 @@ void DrawBufferInit(DrawBuffer *b, struct vec2i size, GraphicsDevice *g)
 		b->tiles[i] = b->tiles[0] + i * size.y;
 	}
 	b->g = g;
-	CArrayInit(&b->displaylist, sizeof(const TTileItem *));
+	CArrayInit(&b->displaylist, sizeof(const Thing *));
 	CArrayReserve(&b->displaylist, 32);
 }
 void DrawBufferTerminate(DrawBuffer *b)
 {
-	CFREE(b->tiles[0]);
-	CFREE(b->tiles);
+	if (b->tiles)
+	{
+		CFREE(b->tiles[0]);
+		CFREE(b->tiles);
+	}
 	CArrayTerminate(&b->displaylist);
 }
 
@@ -124,41 +127,13 @@ void DrawBufferSetFromMap(
 void DrawBufferFix(DrawBuffer *buffer)
 {
 	Tile *tile = &buffer->tiles[0][0];
-	Tile *tileBelow = &buffer->tiles[0][0] + X_TILES;
-	for (int y = 0; y < Y_TILES - 1; y++)
-	{
-		for (int x = 0; x < buffer->Size.x; x++, tile++, tileBelow++)
-		{
-			if (!(tile->flags & (MAPTILE_IS_WALL | MAPTILE_OFFSET_PIC)) &&
-				(tileBelow->flags & MAPTILE_IS_WALL))
-			{
-				tile->pic = NULL;
-			}
-			else if ((tile->flags & MAPTILE_IS_WALL) &&
-				(tileBelow->flags & MAPTILE_IS_WALL))
-			{
-				tile->flags |= MAPTILE_DELAY_DRAW;
-			}
-		}
-		tile += X_TILES - buffer->Size.x;
-		tileBelow += X_TILES - buffer->Size.x;
-	}
-
-	tile = &buffer->tiles[0][0];
 	for (int y = 0; y < Y_TILES; y++)
 	{
 		for (int x = 0; x < buffer->Size.x; x++, tile++)
 		{
 			const struct vec2i mapTile =
 				svec2i(x + buffer->xStart, y + buffer->yStart);
-			if (!LOSTileIsVisible(&gMap, mapTile))
-			{
-				tile->flags |= MAPTILE_OUT_OF_SIGHT;
-			}
-			else
-			{
-				tile->flags &= ~MAPTILE_OUT_OF_SIGHT;
-			}
+			tile->outOfSight = !LOSTileIsVisible(&gMap, mapTile);
 		}
 		tile += X_TILES - buffer->Size.x;
 	}
@@ -175,8 +150,8 @@ void DrawBufferSortDisplayList(DrawBuffer *buffer)
 }
 static int CompareY(const void *v1, const void *v2)
 {
-	const TTileItem * const *t1 = v1;
-	const TTileItem * const *t2 = v2;
+	const Thing * const *t1 = v1;
+	const Thing * const *t2 = v2;
 	if ((*t1)->Pos.y < (*t2)->Pos.y)
 	{
 		return -1;

@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2016, Cong Xu
+    Copyright (c) 2013-2016, 2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -69,18 +69,16 @@ typedef struct
 	const MapObject *Class;
 	int Health;
 	int counter;
-	TTileItem tileItem;
+	Thing thing;
 	bool isInUse;
 } TObject;
 
 typedef struct MobileObject
 {
 	int UID;
-	int PlayerUID;	// -1 if not owned by any player
 	int ActorUID;	// unique ID of actor that owns this object
 					// (prevent self collision)
 	const BulletClass *bulletClass;
-	struct vec2 Pos;
 	int z;
 	int dz;
 	int count;
@@ -88,8 +86,7 @@ typedef struct MobileObject
 	int flags;
 	// Don't trigger special effects too frequently
 	int specialLock;
-	TTileItem tileItem;
-	BulletUpdateFunc updateFunc;
+	Thing thing;
 	bool isInUse;
 } TMobileObject;
 typedef int (*MobObjUpdateFunc)(TMobileObject *, int);
@@ -97,17 +94,18 @@ extern CArray gMobObjs;	// of TMobileObject
 extern CArray gObjs;	// of TObject
 
 
-bool CanHit(const int flags, const int uid, const TTileItem *target);
+bool CanHit(const int flags, const int uid, const Thing *target);
 bool HasHitSound(
 	const int flags, const int playerUID,
-	const TileItemKind targetKind, const int targetUID,
+	const ThingKind targetKind, const int targetUID,
 	const special_damage_e special, const bool allowFriendlyHitSound);
 void Damage(
 	const struct vec2 hitVector,
 	const int power,
 	const float mass,
-	const int flags, const int playerUID, const int uid,
-	const TileItemKind targetKind, const int targetUID,
+	const int flags,
+	const TActor *source,
+	const ThingKind targetKind, const int targetUID,
 	const special_damage_e special);
 
 void ObjsInit(void);
@@ -124,11 +122,10 @@ void UpdateObjects(const int ticks);
 
 TObject *ObjGetByUID(const int uid);
 
-void DamageObject(const NMapObjectDamage mod);
+void DamageObject(const NThingDamage d);
 
 void UpdateMobileObjects(int ticks);
 void MobObjsInit(void);
 void MobObjsTerminate(void);
 int MobObjsObjsGetNextUID(void);
 TMobileObject *MobObjGetByUID(const int uid);
-void MobObjDestroy(TMobileObject *m);

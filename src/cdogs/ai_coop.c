@@ -151,7 +151,7 @@ static int AICoopGetCmdNormal(TActor *actor)
 				const TMobileObject *mo = CArrayGet(&gMobObjs, tid->Id);
 				if (mo->bulletClass->HurtAlways)
 				{
-					dangerBulletPos = mo->Pos;
+					dangerBulletPos = mo->thing.Pos;
 					break;
 				}
 			CA_FOREACH_END()
@@ -190,8 +190,7 @@ static int AICoopGetCmdNormal(TActor *actor)
 			if (w->Gun->AmmoId != -1)
 			{
 				const Ammo *ammo = AmmoGetById(&gAmmo, w->Gun->AmmoId);
-				if (lowAmmoGun == -1 &&
-					ammoAmount < ammo->Amount * AMMO_STARTING_MULTIPLE)
+				if (lowAmmoGun == -1 && ammoAmount < ammo->Amount)
 				{
 					lowAmmoGun = i;
 				}
@@ -350,7 +349,7 @@ static int SmartGoto(
 	if (o && ObjIsDangerous(o) &&
 		svec2i_is_equal(tilePos, actor->aiContext->LastTile))
 	{
-		cmd = AIGoto(actor, o->tileItem.Pos, true);
+		cmd = AIGoto(actor, o->thing.Pos, true);
 		if (ACTOR_GET_WEAPON(actor)->lock <= 0)
 		{
 			cmd |= CMD_BUTTON1;
@@ -428,7 +427,7 @@ static bool TryCompleteNearbyObjective(
 				const TActor *target = ActorGetByUID(objState->u.UID);
 				hasNoUpdates = target->health > 0;
 				// Update target position
-				objState->Goal = target->tileItem.Pos;
+				objState->Goal = target->thing.Pos;
 			}
 			break;
 		case AI_OBJECTIVE_TYPE_PICKUP:
@@ -526,7 +525,7 @@ static void FindObjectivesSortedByDistance(
 		{
 			ClosestObjective co;
 			memset(&co, 0, sizeof co);
-			co.Pos = closestEnemy->tileItem.Pos;
+			co.Pos = closestEnemy->thing.Pos;
 			co.IsDestructible = false;
 			co.Type = AI_OBJECTIVE_TYPE_KILL;
 			co.Distance2 = svec2_distance_squared(actor->Pos, co.Pos);
@@ -543,7 +542,7 @@ static void FindObjectivesSortedByDistance(
 		}
 		ClosestObjective co;
 		memset(&co, 0, sizeof co);
-		co.Pos = p->tileItem.Pos;
+		co.Pos = p->thing.Pos;
 		co.IsDestructible = false;
 		co.Type = AI_OBJECTIVE_TYPE_NORMAL;
 		switch (p->class->Type)
@@ -570,7 +569,7 @@ static void FindObjectivesSortedByDistance(
 				const Ammo *ammo = AmmoGetById(&gAmmo, ammoId);
 				const int ammoAmount = *(int *)CArrayGet(&actor->ammo, ammoId);
 				if (!ActorUsesAmmo(actor, ammoId) ||
-					ammoAmount > ammo->Amount * AMMO_STARTING_MULTIPLE ||
+					ammoAmount > ammo->Amount ||
 					(closestPlayer != NULL &&
 					ActorUsesAmmo(closestPlayer, ammoId) &&
 					ammoAmount > *(int *)CArrayGet(&closestPlayer->ammo, ammoId)))
@@ -594,14 +593,14 @@ static void FindObjectivesSortedByDistance(
 		// Check if the pickup is actually accessible
 		// This is because random spawning may cause some pickups to be spawned
 		// in inaccessible areas
-		if (MapGetTile(&gMap, Vec2ToTile(co.Pos))->flags & MAPTILE_NO_WALK)
+		if (!TileCanWalk(MapGetTile(&gMap, Vec2ToTile(co.Pos))))
 		{
 			continue;
 		}
 		co.Distance2 = svec2_distance_squared(actor->Pos, co.Pos);
 		if (co.Type == AI_OBJECTIVE_TYPE_NORMAL)
 		{
-			const int objective = ObjectiveFromTileItem(p->tileItem.flags);
+			const int objective = ObjectiveFromThing(p->thing.flags);
 			co.u.Objective =
 				CArrayGet(&gMission.missionData->Objectives, objective);
 		}
@@ -616,10 +615,10 @@ static void FindObjectivesSortedByDistance(
 		}
 		ClosestObjective co;
 		memset(&co, 0, sizeof co);
-		co.Pos = o->tileItem.Pos;
+		co.Pos = o->thing.Pos;
 		co.IsDestructible = true;
 		co.Type = AI_OBJECTIVE_TYPE_NORMAL;
-		if (!(o->tileItem.flags & TILEITEM_OBJECTIVE))
+		if (!(o->thing.flags & THING_OBJECTIVE))
 		{
 			continue;
 		}
@@ -627,7 +626,7 @@ static void FindObjectivesSortedByDistance(
 		co.Distance2 = svec2_distance_squared(actor->Pos, co.Pos);
 		if (co.Type == AI_OBJECTIVE_TYPE_NORMAL)
 		{
-			const int objective = ObjectiveFromTileItem(o->tileItem.flags);
+			const int objective = ObjectiveFromThing(o->thing.flags);
 			co.u.Objective =
 				CArrayGet(&gMission.missionData->Objectives, objective);
 		}
@@ -640,12 +639,12 @@ static void FindObjectivesSortedByDistance(
 		{
 			continue;
 		}
-		const TTileItem *ti = &a->tileItem;
-		if (!(ti->flags & TILEITEM_OBJECTIVE))
+		const Thing *ti = &a->thing;
+		if (!(ti->flags & THING_OBJECTIVE))
 		{
 			continue;
 		}
-		const int objective = ObjectiveFromTileItem(ti->flags);
+		const int objective = ObjectiveFromThing(ti->flags);
 		const Objective *o =
 			CArrayGet(&gMission.missionData->Objectives, objective);
 		if (o->Type != OBJECTIVE_KILL && o->Type != OBJECTIVE_RESCUE)
@@ -704,13 +703,16 @@ static bool OnClosestPickupGun(
 	{
 		return false;
 	}
+	const WeaponClass *pickupGun = IdWeaponClass(p->class->u.GunId);
+	const int weaponIndexStart = pickupGun->IsGrenade ? MAX_GUNS : 0;
+	const int weaponIndexEnd = pickupGun->IsGrenade ? MAX_WEAPONS : MAX_GUNS;
 	// Pick up if:
 	// - we have a gun with less ammo than starting,
 	// - and lower than lead player, who uses the ammo,
 	// - or if there is a free weapon slot,
-	// - and the
+	// - and the gun is the same type (normal, grenade)
 	bool hasGunLowOnAmmo = false;
-	for (int i = 0; i < MAX_WEAPONS; i++)
+	for (int i = weaponIndexStart; i < weaponIndexEnd; i++)
 	{
 		if (actor->guns[i].Gun == NULL)
 		{
@@ -724,7 +726,7 @@ static bool OnClosestPickupGun(
 		}
 		const Ammo *ammo = AmmoGetById(&gAmmo, ammoId);
 		const int ammoAmount = *(int *)CArrayGet(&actor->ammo, ammoId);
-		if (ammoAmount >= ammo->Amount * AMMO_STARTING_MULTIPLE ||
+		if (ammoAmount >= ammo->Amount ||
 			(closestPlayer != NULL &&
 			ActorUsesAmmo(closestPlayer, ammoId) &&
 			ammoAmount > *(int *)CArrayGet(&closestPlayer->ammo, ammoId)))

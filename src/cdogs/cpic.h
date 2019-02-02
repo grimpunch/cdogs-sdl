@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2013-2016, 2018 Cong Xu
+    Copyright (c) 2013-2016, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -74,7 +74,11 @@ typedef struct
 {
 	direction_e Dir;
 	struct vec2i Offset;
+	double Radians;
+	struct vec2 Scale;
+	color_t Mask;
 } CPicDrawContext;
+CPicDrawContext CPicDrawContextNew(void);
 typedef void (*DrawCPicFunc)(GraphicsDevice *, const int, const struct vec2i);
 
 void NamedPicFree(NamedPic *n);
@@ -83,7 +87,9 @@ void NamedSpritesInit(NamedSprites *ns, const char *name);
 void NamedSpritesFree(NamedSprites *ns);
 
 void CPicLoadJSON(CPic *p, json_t *node);
-void CPicLoadNormal(CPic *p, json_t *node);
+void CPicInitNormal(CPic *p, const Pic *pic);
+void CPicInitNormalFromName(CPic *p, const char *name);
+void CPicLoadNormal(CPic *p, const json_t *node);
 bool CPicIsLoaded(const CPic *p);
 struct vec2i CPicGetSize(const CPic *p);
 // Copy everything except frame

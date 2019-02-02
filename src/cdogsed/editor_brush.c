@@ -200,11 +200,12 @@ void EditorBrushSetHighlightedTiles(EditorBrush *b)
 	}
 }
 
-static void SetTile(Mission *m, struct vec2i pos, unsigned short tile)
+static void SetTile(Mission *m, struct vec2i pos, const uint16_t tile)
 {
 	if (MissionTrySetTile(m, pos, tile))
 	{
-		MapSetTile(&gMap, pos, tile, m);
+		const TileClass *t = MapBuildGetTileFromType(tile);
+		MapBuildTile(&gMap, m, pos, t);
 	}
 }
 
@@ -244,8 +245,8 @@ static void EditorBrushPaintLine(EditorBrush *b, Mission *m)
 	b->IsPainting = 1;
 	b->LastPos = b->Pos;
 }
-// Paint all the edge tiles as a wall, unless they are room tiles already;
-// then paint the interior as room tiles
+// Paint all the edge tiles as a wall, then paint the interior as room tiles
+// TODO: change to generic tile painter
 static void EditorBrushPaintRoom(EditorBrush *b, Mission *m)
 {
 	struct vec2i v;
@@ -253,18 +254,15 @@ static void EditorBrushPaintRoom(EditorBrush *b, Mission *m)
 	{
 		for (v.x = 0; v.x < b->BrushSize; v.x++)
 		{
-			unsigned short tile = MAP_ROOM;
+			// TODO: tile classes
+			uint16_t tile = MAP_ROOM;
 			if (v.x == 0 || v.x == b->BrushSize - 1 ||
 				v.y == 0 || v.y == b->BrushSize - 1)
 			{
 				tile = MAP_WALL;
 			}
 			const struct vec2i pos = svec2i_add(b->Pos, v);
-			const unsigned short tileExisting = IMapGet(&gMap, pos);
-			if (tileExisting != MAP_ROOM)
-			{
-				SetTile(m, pos, tile);
-			}
+			SetTile(m, pos, tile);
 		}
 	}
 	b->IsPainting = true;
@@ -273,8 +271,8 @@ static void EditorBrushPaintRoom(EditorBrush *b, Mission *m)
 typedef struct
 {
 	Mission *m;
-	unsigned short fromType;
-	unsigned short toType;
+	uint16_t fromType;
+	uint16_t toType;
 } PaintFloodFillData;
 static void MissionFillTile(void *data, struct vec2i v);
 static bool MissionIsTileSame(void *data, struct vec2i v);
@@ -449,8 +447,7 @@ static bool MissionIsTileSame(void *data, struct vec2i v)
 	return (MissionGetTile(pData->m, v) & MAP_MASKACCESS) == pData->fromType;
 }
 static void EditorBrushPaintBox(
-	EditorBrush *b, Mission *m,
-	unsigned short lineType, unsigned short fillType)
+	EditorBrush *b, Mission *m, uint16_t lineType, uint16_t fillType)
 {
 	// Draw the fill first, then the line
 	// This will create the expected results when brush size is
@@ -533,7 +530,7 @@ EditorResult EditorBrushStopPainting(EditorBrush *b, Mission *m)
 				struct vec2i v;
 				int i;
 				int delta;
-				CArrayInit(&movedTiles, sizeof(unsigned short));
+				CArrayInit(&movedTiles, sizeof(uint16_t));
 				// Copy tiles to temp from selection, setting them to MAP_FLOOR
 				// in the process
 				for (v.y = 0; v.y < b->SelectionSize.y; v.y++)
@@ -542,8 +539,7 @@ EditorResult EditorBrushStopPainting(EditorBrush *b, Mission *m)
 					{
 						struct vec2i vOffset = svec2i_add(v, b->SelectionStart);
 						int idx = vOffset.y * m->Size.x + vOffset.x;
-						unsigned short *tile = CArrayGet(
-							&m->u.Static.Tiles, idx);
+						uint16_t *tile = CArrayGet(&m->u.Static.Tiles, idx);
 						CArrayPushBack(&movedTiles, tile);
 						*tile = MAP_FLOOR;
 					}
@@ -563,9 +559,8 @@ EditorResult EditorBrushStopPainting(EditorBrush *b, Mission *m)
 							vOffset.y >= 0 && vOffset.y < m->Size.y)
 						{
 							int idx = vOffset.y * m->Size.x + vOffset.x;
-							unsigned short *tileFrom =
-								CArrayGet(&movedTiles, i);
-							unsigned short *tileTo = CArrayGet(
+							uint16_t *tileFrom = CArrayGet(&movedTiles, i);
+							uint16_t *tileTo = CArrayGet(
 								&m->u.Static.Tiles, idx);
 							*tileTo = *tileFrom;
 							result = EDITOR_RESULT_CHANGED_AND_RELOAD;

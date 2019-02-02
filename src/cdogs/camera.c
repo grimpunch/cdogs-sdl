@@ -41,11 +41,17 @@
 void CameraInit(Camera *camera)
 {
 	memset(camera, 0, sizeof *camera);
-	DrawBufferInit(
-		&camera->Buffer, svec2i(X_TILES, Y_TILES), &gGraphicsDevice);
+	CameraReset(camera);
 	camera->lastPosition = svec2_zero();
 	HUDInit(&camera->HUD, &gGraphicsDevice, &gMission);
 	camera->shake = ScreenShakeZero();
+}
+
+void CameraReset(Camera *camera)
+{
+	DrawBufferTerminate(&camera->Buffer);
+	DrawBufferInit(
+		&camera->Buffer, svec2i(X_TILES, Y_TILES), &gGraphicsDevice);
 }
 
 void CameraTerminate(Camera *camera)
@@ -171,7 +177,7 @@ void CameraUpdate(Camera *camera, const int ticks, const int ms)
 				const PlayerData *firstPlayer =
 					camera->HUD.DrawData.Players[0];
 				const TActor *p = ActorGetByUID(firstPlayer->ActorUID);
-				camera->lastPosition = p->tileItem.Pos;
+				camera->lastPosition = p->thing.Pos;
 			}
 			else if (singleScreen)
 			{
@@ -204,7 +210,7 @@ void CameraUpdate(Camera *camera, const int ticks, const int ms)
 			{
 				const PlayerData *p = camera->HUD.DrawData.Players[i];
 				const TActor *a = ActorGetByUID(p->ActorUID);
-				camera->lastPosition = a->tileItem.Pos;
+				camera->lastPosition = a->thing.Pos;
 				SoundSetEarsSide(i == 0, camera->lastPosition);
 			}
 
@@ -225,7 +231,7 @@ void CameraUpdate(Camera *camera, const int ticks, const int ms)
 					continue;
 				}
 				const TActor *a = ActorGetByUID(p->ActorUID);
-				camera->lastPosition = a->tileItem.Pos;
+				camera->lastPosition = a->thing.Pos;
 
 				// Set the sound "ears"
 				const bool isLeft = i == 0 || i == 2;
@@ -306,7 +312,7 @@ void CameraDraw(Camera *camera, const HUDDrawData drawData)
 						continue;
 					}
 					const TActor *a = ActorGetByUID(p->ActorUID);
-					LOSCalcFrom(&gMap, Vec2ToTile(a->tileItem.Pos), false);
+					LOSCalcFrom(&gMap, Vec2ToTile(a->thing.Pos), false);
 				CA_FOREACH_END()
 			}
 
@@ -320,6 +326,17 @@ void CameraDraw(Camera *camera, const HUDDrawData drawData)
 			// side-by-side split
 			for (int i = 0; i < drawData.NumScreens; i++)
 			{
+				const PlayerData *p = drawData.Players[i];
+				if (!IsPlayerAliveOrDying(p))
+				{
+					continue;
+				}
+				const TActor *a = ActorGetByUID(p->ActorUID);
+				if (a == NULL)
+				{
+					continue;
+				}
+				camera->lastPosition = a->thing.Pos;
 				struct vec2i centerOffsetPlayer = centerOffset;
 				const int clipLeft = (i & 1) ? w / 2 : 0;
 				const int clipRight = (i & 1) ? w - 1 : (w / 2) - 1;
@@ -345,15 +362,21 @@ void CameraDraw(Camera *camera, const HUDDrawData drawData)
 			for (int i = 0; i < drawData.NumScreens; i++)
 			{
 				const PlayerData *p = drawData.Players[i];
+				if (!IsPlayerAliveOrDying(p))
+				{
+					continue;
+				}
+				const TActor *a = ActorGetByUID(p->ActorUID);
+				if (a == NULL)
+				{
+					continue;
+				}
+				camera->lastPosition = a->thing.Pos;
 				struct vec2i centerOffsetPlayer = centerOffset;
 				const int clipLeft = (i & 1) ? w / 2 : 0;
 				const int clipTop = (i < 2) ? 0 : h / 2 - 1;
 				const int clipRight = (i & 1) ? w - 1 : (w / 2) - 1;
 				const int clipBottom = (i < 2) ? h / 2 : h - 1;
-				if (!IsPlayerAliveOrDying(p))
-				{
-					continue;
-				}
 				GraphicsSetBlitClip(
 					&gGraphicsDevice,
 					clipLeft, clipTop, clipRight, clipBottom);

@@ -28,11 +28,9 @@
 */
 #include "config.h"
 
-#include "blit.h"
 #include "collision/collision.h"
 #include "gamedata.h"
 #include "grafx_bg.h"
-#include "pic_manager.h"
 
 
 bool ConfigApply(Config *config)

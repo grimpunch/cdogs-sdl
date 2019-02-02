@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2015, Cong Xu
+    Copyright (c) 2013-2015, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -49,7 +49,14 @@
 #include "damage.h"
 
 #include "actors.h"
+#include "campaigns.h"
 #include "game_events.h"
+#include "objs.h"
+
+// Spread the blood spurt direction
+#define MELEE_SPREAD_FACTOR 0.5f
+// make blood spurt further
+#define MELEE_VEL_SCALE 40.0f
 
 
 bool CanHitCharacter(const int flags, const int uid, const TActor *actor)
@@ -63,28 +70,31 @@ bool CanHitCharacter(const int flags, const int uid, const TActor *actor)
 }
 
 bool CanDamageCharacter(
-	const int flags, const int playerUID, const int uid,
-	const TActor *actor, const special_damage_e special)
+	const int flags, const TActor *source,
+	const TActor *target, const special_damage_e special)
 {
-	if (!CanHitCharacter(flags, uid, actor))
+	if (!CanHitCharacter(flags, source ? source->uid : -1, target))
 	{
 		return false;
 	}
-	if (ActorIsImmune(actor, special))
+	if (ActorIsImmune(target, special))
 	{
 		return false;
 	}
-	return !ActorIsInvulnerable(actor, flags, playerUID, gCampaign.Entry.Mode);
+	return !ActorIsInvulnerable(
+		target, flags, source ? source->PlayerUID : -1, gCampaign.Entry.Mode);
 }
 
 static void TrackKills(PlayerData *pd, const TActor *victim);
-void DamageActor(TActor *victim, const int power, const int hitterPlayerUID)
+void DamageActor(TActor *victim, const int power, const int sourceActorUID)
 {
 	const int startingHealth = victim->health;
 	InjureActor(victim, power);
-	if (startingHealth > 0 && victim->health <= 0 && hitterPlayerUID >= 0)
+	const TActor *source = ActorGetByUID(sourceActorUID);
+	if (startingHealth > 0 && victim->health <= 0 &&
+		source != NULL && source->PlayerUID >= 0)
 	{
-		TrackKills(PlayerDataGetByUID(hitterPlayerUID), victim);
+		TrackKills(PlayerDataGetByUID(source->PlayerUID), victim);
 	}
 }
 static void TrackKills(PlayerData *pd, const TActor *victim)
@@ -105,5 +115,37 @@ static void TrackKills(PlayerData *pd, const TActor *victim)
 	{
 		pd->Stats.Kills++;
 		pd->Totals.Kills++;
+	}
+}
+
+void DamageMelee(const NActorMelee m)
+{
+	const TActor *a = ActorGetByUID(m.UID);
+	if (!a->isInUse) return;
+	const BulletClass *b = StrBulletClass(m.BulletClass);
+	if ((HitType)m.HitType != HIT_NONE &&
+		HasHitSound(a->flags, a->PlayerUID,
+		(ThingKind)m.TargetKind, m.TargetUID,
+		SPECIAL_NONE, false))
+	{
+		PlayHitSound(&b->HitSound, (HitType)m.HitType, a->Pos);
+	}
+	if (!gCampaign.IsClient)
+	{
+		const Thing *target = ThingGetByUID(
+			(ThingKind)m.TargetKind, m.TargetUID);
+		const struct vec2 vel = svec2_scale(
+			svec2_add(
+				svec2_normalize(svec2_subtract(target->Pos, a->Pos)),
+				svec2(
+					RAND_FLOAT(-MELEE_SPREAD_FACTOR, MELEE_SPREAD_FACTOR),
+					RAND_FLOAT(-MELEE_SPREAD_FACTOR, MELEE_SPREAD_FACTOR))),
+			MELEE_VEL_SCALE);
+		Damage(
+			vel,
+			b->Power, b->Mass,
+			a->flags, a,
+			(ThingKind)m.TargetKind, m.TargetUID,
+			SPECIAL_NONE);
 	}
 }

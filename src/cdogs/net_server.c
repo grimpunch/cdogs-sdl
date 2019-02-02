@@ -440,7 +440,7 @@ void NetServerSendGameStartMessages(NetServer *n, const int peerId)
 		aa.Health = a->health;
 		aa.Direction = (int32_t)a->direction;
 		aa.PlayerUID = a->PlayerUID;
-		aa.TileItemFlags = a->tileItem.flags;
+		aa.ThingFlags = a->thing.flags;
 		aa.Pos = Vec2ToNet(a->Pos);
 		LOG(LM_NET, LL_DEBUG, "send add actor UID(%d) playerUID(%d)",
 			(int)aa.UID, (int)aa.PlayerUID);
@@ -470,9 +470,7 @@ void NetServerSendGameStartMessages(NetServer *n, const int peerId)
 		{
 			const Tile *t = MapGetTile(&gMap, pos);
 			// Use RLE, so check if the current tile is the same as the last
-			if (tLast != NULL &&
-				t->pic == tLast->pic && t->picAlt == tLast->picAlt &&
-				t->flags == tLast->flags)
+			if (tLast != NULL && t->Class == tLast->Class)
 			{
 				ts.RunLength++;
 			}
@@ -486,9 +484,10 @@ void NetServerSendGameStartMessages(NetServer *n, const int peerId)
 				// Begin the next run
 				memset(&ts, 0, sizeof ts);
 				ts.Pos = Vec2i2Net(pos);
-				if (t->pic != NULL) strcpy(ts.PicName, t->pic->name);
-				if (t->picAlt != NULL) strcpy(ts.PicAltName, t->picAlt->name);
-				ts.Flags = t->flags;
+				if (t->Class != NULL && t->Class->Name)
+				{
+					strcpy(ts.ClassName, t->Class->Name);
+				}
 				ts.RunLength = 0;
 			}
 			tLast = t;
@@ -528,8 +527,8 @@ void NetServerSendGameStartMessages(NetServer *n, const int peerId)
 		strcpy(api.PickupClass, p->class->Name);
 		api.IsRandomSpawned = p->IsRandomSpawned;
 		api.SpawnerUID = p->SpawnerUID;
-		api.TileItemFlags = p->tileItem.flags;
-		api.Pos = Vec2ToNet(p->tileItem.Pos);
+		api.ThingFlags = p->thing.flags;
+		api.Pos = Vec2ToNet(p->thing.Pos);
 		NetServerSendMsg(n, peerId, GAME_EVENT_ADD_PICKUP, &api);
 	CA_FOREACH_END()
 
@@ -539,12 +538,12 @@ void NetServerSendGameStartMessages(NetServer *n, const int peerId)
 		NMapObjectAdd amo = NMapObjectAdd_init_default;
 		amo.UID = o->uid;
 		strcpy(amo.MapObjectClass, o->Class->Name);
-		amo.Pos = Vec2ToNet(o->tileItem.Pos);
-		amo.TileItemFlags = o->tileItem.flags;
+		amo.Pos = Vec2ToNet(o->thing.Pos);
+		amo.ThingFlags = o->thing.flags;
 		amo.Health = o->Health;
 		LOG(LM_NET, LL_DEBUG,
 			"send add map object UID(%d) pos(%d, %d) flags(%x) health(%d)",
-			(int)amo.UID, amo.Pos.x, amo.Pos.y, amo.TileItemFlags, amo.Health);
+			(int)amo.UID, amo.Pos.x, amo.Pos.y, amo.ThingFlags, amo.Health);
 		NetServerSendMsg(n, peerId, GAME_EVENT_MAP_OBJECT_ADD, &amo);
 	CA_FOREACH_END()
 

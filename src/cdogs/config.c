@@ -569,6 +569,7 @@ Config ConfigDefault(void)
 		DIFFICULTY_VERYEASY, DIFFICULTY_VERYHARD,
 		StrDifficulty, DifficultyStr));
 	ConfigGroupAdd(&game, ConfigNewInt("FPS", 70, 10, 120, 10, NULL, NULL));
+	ConfigGroupAdd(&game, ConfigNewBool("Superhot(tm)Mode", false));
 	ConfigGroupAdd(&game,
 		ConfigNewInt("EnemyDensity", 100, 25, 200, 25, NULL, PercentStr));
 	ConfigGroupAdd(&game,
@@ -620,16 +621,16 @@ Config ConfigDefault(void)
 #endif
 		));
 	ConfigGroupAdd(&gfx,
-		ConfigNewInt("ResolutionWidth", 320, 0, 0, 0, NULL, NULL));
+		ConfigNewInt("WindowWidth", 640, 320, 4096, 0, NULL, NULL));
 	ConfigGroupAdd(&gfx,
-		ConfigNewInt("ResolutionHeight", 240, 0, 0, 0, NULL, NULL));
+		ConfigNewInt("WindowHeight", 480, 200, 2160, 0, NULL, NULL));
 	ConfigGroupAdd(&gfx, ConfigNewInt("ScaleFactor",
 #ifdef __GCWZERO__
 		1
 #else
 		2
 #endif
-		, 1, 4, 1, NULL, NULL));
+		, 1, 16, 1, NULL, NULL));
 	ConfigGroupAdd(&gfx,
 		ConfigNewInt("ShakeMultiplier", 1, 0, 10, 1, NULL, NULL));
 	ConfigGroupAdd(&gfx, ConfigNewBool("ShowHUD", true));

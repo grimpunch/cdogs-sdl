@@ -1,7 +1,7 @@
 /*
     C-Dogs SDL
     A port of the legendary (and fun) action/arcade cdogs.
-    Copyright (c) 2014-2017 Cong Xu
+    Copyright (c) 2014-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -370,6 +370,7 @@ void LoadMissions(CArray *missions, json_t *missionsNode, int version)
 		CArrayPushBack(missions, &m);
 	}
 }
+static void LoadStaticTileCSV(Mission *m, char *tileCSV);
 static void LoadStaticItems(
 	Mission *m, json_t *node, const char *name, const int version);
 static void LoadStaticWrecks(
@@ -380,7 +381,7 @@ static void LoadStaticKeys(Mission *m, json_t *node, char *name);
 static void LoadStaticExit(Mission *m, json_t *node, char *name);
 static bool TryLoadStaticMap(Mission *m, json_t *node, int version)
 {
-	CArrayInit(&m->u.Static.Tiles, sizeof(unsigned short));
+	CArrayInit(&m->u.Static.Tiles, sizeof(uint16_t));
 	if (version == 1)
 	{
 		// JSON array
@@ -392,22 +393,27 @@ static bool TryLoadStaticMap(Mission *m, json_t *node, int version)
 		tiles = tiles->child;
 		for (tiles = tiles->child; tiles; tiles = tiles->next)
 		{
-			unsigned short n = (unsigned short)atoi(tiles->text);
+			uint16_t n = (uint16_t)atoi(tiles->text);
 			CArrayPushBack(&m->u.Static.Tiles, &n);
 		}
 	}
-	else
+	else if (version <= 14)
 	{
 		// CSV string
 		char *tileCSV = GetString(node, "Tiles");
-		char *pch = strtok(tileCSV, ",");
-		while (pch != NULL)
-		{
-			unsigned short n = (unsigned short)atoi(pch);
-			CArrayPushBack(&m->u.Static.Tiles, &n);
-			pch = strtok(NULL, ",");
-		}
+		LoadStaticTileCSV(m, tileCSV);
 		CFREE(tileCSV);
+	}
+	else
+	{
+		// CSV string per row
+		// TODO: tile ids
+		json_t *tile = json_find_first_label(node, "Tiles")->child->child;
+		while (tile)
+		{
+			LoadStaticTileCSV(m, tile->text);
+			tile = tile->next;
+		}
 	}
 
 	CArrayInit(&m->u.Static.Items, sizeof(MapObjectPositions));
@@ -424,6 +430,16 @@ static bool TryLoadStaticMap(Mission *m, json_t *node, int version)
 	LoadStaticExit(m, node, "Exit");
 
 	return true;
+}
+static void LoadStaticTileCSV(Mission *m, char *tileCSV)
+{
+	char *pch = strtok(tileCSV, ",");
+	while (pch != NULL)
+	{
+		const uint16_t n = (uint16_t)atoi(pch);
+		CArrayPushBack(&m->u.Static.Tiles, &n);
+		pch = strtok(NULL, ",");
+	}
 }
 
 static void LoadMissionObjectives(

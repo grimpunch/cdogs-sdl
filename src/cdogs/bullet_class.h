@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2015, Cong Xu
+    Copyright (c) 2013-2015, 2018 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -57,11 +57,15 @@
 #include "tile.h"
 
 struct MobileObject;
-typedef bool (*BulletUpdateFunc)(struct MobileObject *, int);
 typedef struct
 {
 	char *Name;
 	CPic CPic;
+	struct
+	{
+		const ParticleClass *P;
+		float Width;
+	} Trail;
 	struct vec2i ShadowSize;
 	int Delay;	// number of frames before moving
 	float SpeedLow;
@@ -79,6 +83,7 @@ typedef struct
 	bool Persists;	// remains even after hitting walls/items
 	const ParticleClass *Spark;
 	const ParticleClass *OutOfRangeSpark;
+	const ParticleClass *WallMark;
 	HitSounds HitSound;
 	bool WallBounces;
 	bool HitsObjects;
@@ -121,8 +126,10 @@ void BulletClassesClear(CArray *classes);
 void BulletTerminate(BulletClasses *bullets);
 
 void BulletAdd(const NAddBullet add);
+void BulletDestroy(struct MobileObject *obj);
 
-bool UpdateBullet(struct MobileObject *obj, const int ticks);
+bool BulletUpdate(struct MobileObject *obj, const int ticks);
+void BulletBounce(const NBulletBounce bb);
 
 // Type of material that the bullet hit
 typedef enum

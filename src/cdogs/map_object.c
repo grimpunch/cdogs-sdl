@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2014, 2016-2017 Cong Xu
+    Copyright (c) 2014, 2016-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -204,12 +204,12 @@ int MapObjectGetFlags(const MapObject *mo)
 	int flags = 0;
 	if (mo->DrawLast)
 	{
-		flags |= TILEITEM_DRAW_LAST;
+		flags |= THING_DRAW_LAST;
 	}
 	if (mo->Health > 0)
 	{
-		flags |= TILEITEM_IMPASSABLE;
-		flags |= TILEITEM_CAN_BE_SHOT;
+		flags |= THING_IMPASSABLE;
+		flags |= THING_CAN_BE_SHOT;
 	}
 	return flags;
 }
@@ -491,8 +491,10 @@ static void SetupSpawner(
 {
 	memset(m, 0, sizeof *m);
 	CSTRDUP(m->Name, spawnerName);
-	m->Pic.Type = PICTYPE_NORMAL;
-	m->Pic.u.Pic = PicManagerGetPic(&gPicManager, "spawn_pad");
+	m->Pic.Type = PICTYPE_ANIMATED;
+	m->Pic.u.Animated.Sprites =
+		&PicManagerGetSprites(&gPicManager, "spawn_pad")->pics;
+	m->Pic.u.Animated.TicksPerFrame = 8;
 	m->Pic.Mask = colorWhite;
 	const struct vec2i size = CPicGetSize(&m->Pic);
 	m->Offset = svec2i(-size.x / 2, TILE_HEIGHT / 2 - size.y);
@@ -544,68 +546,17 @@ const Pic *MapObjectGetPic(const MapObject *mo, struct vec2i *offset)
 
 
 bool MapObjectIsTileOK(
-	const MapObject *obj, unsigned short tile, const bool isEmpty,
-	unsigned short tileAbove)
+	const MapObject *obj, const Tile *tile, const Tile *tileAbove)
 {
-	tile &= MAP_MASKACCESS;
-	if (tile != MAP_FLOOR && tile != MAP_SQUARE && tile != MAP_ROOM)
-	{
-		return 0;
-	}
-	if (!isEmpty)
-	{
-		return 0;
-	}
-	tileAbove &= MAP_MASKACCESS;
-	if ((obj->Flags & (1 << PLACEMENT_ON_WALL)) && tileAbove != MAP_WALL)
-	{
-		return 0;
-	}
-	return 1;
-}
-bool MapObjectIsTileOKStrict(
-	const MapObject *obj, const unsigned short tile, const bool isEmpty,
-	const unsigned short tileAbove, const unsigned short tileBelow,
-	const int numWallsAdjacent, const int numWallsAround)
-{
-	if (!MapObjectIsTileOK(obj, tile, isEmpty, tileAbove))
-	{
-		return 0;
-	}
-	unsigned short tileAccess = tile & MAP_MASKACCESS;
-	if (tile & MAP_LEAVEFREE)
-	{
-		return 0;
-	}
-
-	if (obj->Flags & (1 << PLACEMENT_OUTSIDE) && tileAccess == MAP_ROOM)
+	if (!TileIsClear(tile))
 	{
 		return false;
 	}
-	if ((obj->Flags & (1 << PLACEMENT_INSIDE)) && tileAccess != MAP_ROOM)
+	if ((obj->Flags & (1 << PLACEMENT_ON_WALL)) &&
+		(tileAbove == NULL || tileAbove->Class->Type != TILE_CLASS_WALL))
 	{
 		return false;
 	}
-	if ((obj->Flags & (1 << PLACEMENT_NO_WALLS)) && numWallsAround != 0)
-	{
-		return false;
-	}
-	if ((obj->Flags & (1 << PLACEMENT_ONE_WALL)) && numWallsAdjacent != 1)
-	{
-		return false;
-	}
-	if ((obj->Flags & (1 << PLACEMENT_ONE_OR_MORE_WALLS)) && numWallsAdjacent < 1)
-	{
-		return false;
-	}
-	if ((obj->Flags & (1 << PLACEMENT_FREE_IN_FRONT)) &&
-		(tileBelow & MAP_MASKACCESS) != MAP_FLOOR &&
-		(tileBelow & MAP_MASKACCESS) != MAP_SQUARE &&
-		(tileBelow & MAP_MASKACCESS) != MAP_ROOM)
-	{
-		return false;
-	}
-
 	return true;
 }
 struct vec2 MapObjectGetPlacementPos(const MapObject *mo, const struct vec2i tilePos)

@@ -35,9 +35,6 @@
 
 
 CArray gPlayerDatas;
-// Templates stored here as it is used by player
-// TODO: 
-CArray gPlayerTemplates;
 
 
 void PlayerDataInit(CArray *p)
@@ -138,9 +135,9 @@ NPlayerData PlayerDataDefault(const int idx)
 	NPlayerData pd = NPlayerData_init_default;
 
 	// load from template if available
-	if ((int)gPlayerTemplates.size > idx)
+	const PlayerTemplate *t = PlayerTemplateGetById(&gPlayerTemplates, idx);
+	if (t != NULL)
 	{
-		const PlayerTemplate *t = CArrayGet(&gPlayerTemplates, idx);
 		strcpy(pd.Name, t->name);
 		strcpy(pd.CharacterClass, t->CharClassName);
 		pd.Colors = CharColors2Net(t->Colors);
@@ -197,37 +194,6 @@ NPlayerData PlayerDataDefault(const int idx)
 			break;
 		}
 	}
-
-	// weapons
-	switch (idx)
-	{
-	case 0:
-		strcpy(pd.Weapons[0], "Shotgun");
-		strcpy(pd.Weapons[1], "Machine gun");
-		strcpy(pd.Weapons[2], "Shrapnel bombs");
-		break;
-	case 1:
-		strcpy(pd.Weapons[0], "Powergun");
-		strcpy(pd.Weapons[1], "Flamer");
-		strcpy(pd.Weapons[2], "Grenades");
-		break;
-	case 2:
-		strcpy(pd.Weapons[0], "Sniper rifle");
-		strcpy(pd.Weapons[1], "Knife");
-		strcpy(pd.Weapons[2], "Molotovs");
-		break;
-	case 3:
-		strcpy(pd.Weapons[0], "Machine gun");
-		strcpy(pd.Weapons[1], "Flamer");
-		strcpy(pd.Weapons[2], "Dynamite");
-		break;
-	default:
-		strcpy(pd.Weapons[0], "Shotgun");
-		strcpy(pd.Weapons[1], "Machine gun");
-		strcpy(pd.Weapons[2], "Shrapnel bombs");
-		break;
-	}
-	pd.Weapons_count = 3;
 
 	pd.MaxHealth = 200;
 
@@ -372,7 +338,7 @@ void PlayersGetBoundingRectangle(struct vec2 *min, struct vec2 *max)
 		if (humansOnly ? IsPlayerHumanAndAlive(p) : IsPlayerAlive(p))
 		{
 			const TActor *player = ActorGetByUID(p->ActorUID);
-			const TTileItem *ti = &player->tileItem;
+			const Thing *ti = &player->thing;
 			if (isFirst)
 			{
 				*min = *max = ti->Pos;

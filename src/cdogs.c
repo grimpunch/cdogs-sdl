@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2017, Cong Xu
+    Copyright (c) 2013-2017, 2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -88,6 +88,7 @@
 #include <cdogs/utils.h>
 
 #include "autosave.h"
+#include "briefing_screens.h"
 #include "command_line.h"
 #include "credits.h"
 #include "mainmenu.h"
@@ -201,6 +202,7 @@ int main(int argc, char *argv[])
 	EventInit(&gEventHandlers, NULL, NULL, true);
 	NetServerInit(&gNetServer);
 	PicManagerInit(&gPicManager);
+	TileClassesInit(&gTileClasses);
 	GraphicsInit(&gGraphicsDevice, &gConfig);
 	GraphicsInitialize(&gGraphicsDevice);
 	if (!gGraphicsDevice.IsInitialized)
@@ -217,7 +219,7 @@ int main(int argc, char *argv[])
 		goto bail;
 	}
 	FontLoadFromJSON(&gFont, "graphics/font.png", "graphics/font.json");
-	PicManagerLoad(&gPicManager, "graphics");
+	PicManagerLoad(&gPicManager);
 	CharSpriteClassesInit(&gCharSpriteClasses);
 
 	ParticleClassesInit(&gParticleClasses, "data/particles.json");
@@ -227,8 +229,7 @@ int main(int argc, char *argv[])
 		"data/bullets.json", "data/guns.json");
 	CharacterClassesInitialize(&gCharacterClasses, "data/character_classes.json");
 #ifndef __EMSCRIPTEN__
-	PlayerTemplatesLoad(
-		&gPlayerTemplates, &gCharacterClasses, PLAYER_TEMPLATE_FILE);
+	PlayerTemplatesLoad(&gPlayerTemplates, &gCharacterClasses);
 #endif
 	PickupClassesInit(
 		&gPickupClasses, "data/pickups.json", &gAmmo, &gWeaponClasses);
@@ -239,6 +240,7 @@ int main(int argc, char *argv[])
 	PlayerDataInit(&gPlayerDatas);
 
 	LoopRunner l = LoopRunnerNew(NULL);
+	LoopRunnerPush(&l, MainMenu(&gGraphicsDevice, &l));
 	// Attempt to pre-load campaign if requested
 	if (loadCampaign != NULL)
 	{
@@ -264,10 +266,6 @@ int main(int argc, char *argv[])
 			printf("Failed to connect\n");
 		}
 	}
-	if (!gCampaign.IsLoaded)
-	{
-		LoopRunnerPush(&l, MainMenu(&gGraphicsDevice, &l));
-	}
 	LOG(LM_MAIN, LL_INFO, "Starting game");
 	LoopRunnerRun(&l);
 	LoopRunnerTerminate(&l);
@@ -292,6 +290,7 @@ bail:
 	CollisionSystemTerminate(&gCollisionSystem);
 
 	CharSpriteClassesTerminate(&gCharSpriteClasses);
+	TileClassesTerminate(&gTileClasses);
 	PicManagerTerminate(&gPicManager);
 	FontTerminate(&gFont);
 	AutosaveSave(&gAutosave, GetConfigFilePath(AUTOSAVE_FILE));

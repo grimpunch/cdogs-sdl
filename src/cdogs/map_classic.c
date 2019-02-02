@@ -22,7 +22,7 @@
     This file incorporates work covered by the following copyright and
     permission notice:
 
-    Copyright (c) 2013-2014, Cong Xu
+    Copyright (c) 2013-2014, 2018-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -48,20 +48,21 @@
 */
 #include "map_classic.h"
 
+#include "campaigns.h"
 #include "map_build.h"
 
 
-static void MapSetupPerimeter(Map *map);
-static int MapTryBuildSquare(Map *map);
+static void MapSetupPerimeter(MapBuilder *mb);
+static int MapTryBuildSquare(MapBuilder *mb);
 static bool MapIsAreaClearForClassicRoom(
-	const Map *map, const struct vec2i pos, const struct vec2i size, const Mission *m,
-	const int pad, bool *isOverlapRoom, unsigned short *overlapAccess);
+	const MapBuilder *mb, const struct vec2i pos, const struct vec2i size,
+	const int pad, bool *isOverlapRoom, uint16_t *overlapAccess);
 static void MapBuildRoom(
-	Map *map, const struct vec2i pos, const struct vec2i size, const Mission *m,
+	MapBuilder *mb, const struct vec2i pos, const struct vec2i size,
 	const int doorMin, const int doorMax, const bool hasKeys,
-	const bool isOverlapRoom, const unsigned short overlapAccess);
-static bool MapTryBuildPillar(Map *map, const Mission *m, const int pad);
-void MapClassicLoad(Map *map, const Mission *m, const CampaignOptions* co)
+	const bool isOverlapRoom, const uint16_t overlapAccess);
+static bool MapTryBuildPillar(MapBuilder *mb, const int pad);
+void MapClassicLoad(MapBuilder *mb)
 {
 	// The classic random map generator randomly attempts to place
 	// a configured number of features on the map, in order:
@@ -81,18 +82,18 @@ void MapClassicLoad(Map *map, const Mission *m, const CampaignOptions* co)
 	// create inaccessible areas on the map.
 
 	// Re-seed RNG so results are consistent
-	CampaignSeedRandom(co);
+	CampaignSeedRandom(mb->co);
 
-	MapSetupPerimeter(map);
+	MapSetupPerimeter(mb);
 
-	const int pad = MAX(m->u.Classic.CorridorWidth, 1);
+	const int pad = MAX(mb->mission->u.Classic.CorridorWidth, 1);
 
 	// place squares
 	int count = 0;
 	int i = 0;
-	while (i < 1000 && count < m->u.Classic.Squares)
+	while (i < 1000 && count < mb->mission->u.Classic.Squares)
 	{
-		if (MapTryBuildSquare(map))
+		if (MapTryBuildSquare(mb))
 		{
 			count++;
 		}
@@ -101,21 +102,22 @@ void MapClassicLoad(Map *map, const Mission *m, const CampaignOptions* co)
 
 	// place rooms
 	count = 0;
-	for (i = 0; i < 1000 && count < m->u.Classic.Rooms.Count; i++)
+	for (i = 0; i < 1000 && count < mb->mission->u.Classic.Rooms.Count; i++)
 	{
-		const struct vec2i v = MapGetRandomTile(map);
-		const int doorMin = CLAMP(m->u.Classic.Doors.Min, 1, 6);
-		const int doorMax = CLAMP(m->u.Classic.Doors.Max, doorMin, 6);
-		const struct vec2i size = MapGetRoomSize(m->u.Classic.Rooms, doorMin);
+		const struct vec2i v = MapGetRandomTile(mb->Map);
+		const int doorMin = CLAMP(mb->mission->u.Classic.Doors.Min, 1, 6);
+		const int doorMax = CLAMP(mb->mission->u.Classic.Doors.Max, doorMin, 6);
+		const struct vec2i size =
+			MapGetRoomSize(mb->mission->u.Classic.Rooms, doorMin);
 		bool isOverlapRoom;
-		unsigned short overlapAccess;
+		uint16_t overlapAccess;
 		if (!MapIsAreaClearForClassicRoom(
-			map, v, size, m, pad, &isOverlapRoom, &overlapAccess))
+			mb, v, size, pad, &isOverlapRoom, &overlapAccess))
 		{
 			continue;
 		}
 		MapBuildRoom(
-			map, v, size, m, doorMin, doorMax,
+			mb, v, size, doorMin, doorMax,
 			AreKeysAllowed(gCampaign.Entry.Mode), isOverlapRoom, overlapAccess);
 		count++;
 	}
@@ -123,9 +125,9 @@ void MapClassicLoad(Map *map, const Mission *m, const CampaignOptions* co)
 	// place pillars
 	count = 0;
 	i = 0;
-	while (i < 1000 && count < m->u.Classic.Pillars.Count)
+	while (i < 1000 && count < mb->mission->u.Classic.Pillars.Count)
 	{
-		if (MapTryBuildPillar(map, m, pad))
+		if (MapTryBuildPillar(mb, pad))
 		{
 			count++;
 		}
@@ -135,10 +137,9 @@ void MapClassicLoad(Map *map, const Mission *m, const CampaignOptions* co)
 	// place walls
 	count = 0;
 	i = 0;
-	while (i < 1000 && count < m->u.Classic.Walls)
+	while (i < 1000 && count < mb->mission->u.Classic.Walls)
 	{
-		if (MapTryBuildWall(
-			map, MAP_FLOOR, pad, m->u.Classic.WallLength))
+		if (MapTryBuildWall(mb, false, pad, mb->mission->u.Classic.WallLength))
 		{
 			count++;
 		}
@@ -146,37 +147,33 @@ void MapClassicLoad(Map *map, const Mission *m, const CampaignOptions* co)
 	}
 }
 
-static void MapSetupPerimeter(Map *map)
+static void MapSetupPerimeter(MapBuilder *mb)
 {
-	struct vec2i v;
-	for (v.y = 0; v.y < map->Size.y; v.y++)
-	{
-		for (v.x = 0; v.x < map->Size.x; v.x++)
+	RECT_FOREACH(Rect2iNew(svec2i_zero(), mb->Map->Size))
+		if (_v.x != 0 && _v.x != mb->Map->Size.x - 1 &&
+			_v.y != 0 && _v.y != mb->Map->Size.y - 1)
 		{
-			if (v.y == 0 || v.y == map->Size.y - 1 ||
-				v.x == 0 || v.x == map->Size.x - 1)
-			{
-				IMapSet(map, v, MAP_WALL);
-			}
+			continue;
 		}
-	}
+		MapBuilderSetTile(mb, _v, &gTileWall);
+	RECT_FOREACH_END()
 }
 
-static int MapTryBuildSquare(Map *map)
+static int MapTryBuildSquare(MapBuilder *mb)
 {
-	const struct vec2i v = MapGetRandomTile(map);
+	const struct vec2i v = MapGetRandomTile(mb->Map);
 	struct vec2i size = svec2i(rand() % 9 + 8, rand() % 9 + 8);
-	if (MapIsAreaClear(map, v, size))
+	if (MapIsAreaClear(mb, v, size))
 	{
-		MapMakeSquare(map, v, size);
+		MapMakeSquare(mb, v, size);
 		return 1;
 	}
 	return 0;
 }
 
 static bool MapIsAreaClearForClassicRoom(
-	const Map *map, const struct vec2i pos, const struct vec2i size, const Mission *m,
-	const int pad, bool *isOverlapRoom, unsigned short *overlapAccess)
+	const MapBuilder *mb, const struct vec2i pos, const struct vec2i size,
+	const int pad, bool *isOverlapRoom, uint16_t *overlapAccess)
 {
 	struct vec2i clearPos = svec2i(pos.x - pad, pos.y - pad);
 	struct vec2i clearSize = svec2i(size.x + 2 * pad, size.y + 2 * pad);
@@ -184,7 +181,7 @@ static bool MapIsAreaClearForClassicRoom(
 	*isOverlapRoom = false;
 	*overlapAccess = 0;
 
-	if (m->u.Classic.Rooms.Edge)
+	if (mb->mission->u.Classic.Rooms.Edge)
 	{
 		// Check if room is at edge; if so only check if clear inside edge
 		if (pos.x == 0 || pos.x == 1)
@@ -194,10 +191,10 @@ static bool MapIsAreaClearForClassicRoom(
 			clearSize.x -= dx;
 			isEdgeRoom = true;
 		}
-		else if (pos.x + size.x == map->Size.x - 2 ||
-				 pos.x + size.x == map->Size.x - 1)
+		else if (pos.x + size.x == mb->Map->Size.x - 2 ||
+				 pos.x + size.x == mb->Map->Size.x - 1)
 		{
-			clearSize.x = map->Size.x - 1 - pos.x;
+			clearSize.x = mb->Map->Size.x - 1 - pos.x;
 			isEdgeRoom = true;
 		}
 		if (pos.y == 0 || pos.y == 1)
@@ -207,54 +204,55 @@ static bool MapIsAreaClearForClassicRoom(
 			clearSize.y -= dy;
 			isEdgeRoom = true;
 		}
-		else if (pos.y + size.y == map->Size.y - 2 ||
-				 pos.y + size.y == map->Size.y - 1)
+		else if (pos.y + size.y == mb->Map->Size.y - 2 ||
+				 pos.y + size.y == mb->Map->Size.y - 1)
 		{
-			clearSize.y = map->Size.y - 1 - pos.y;
+			clearSize.y = mb->Map->Size.y - 1 - pos.y;
 			isEdgeRoom = true;
 		}
 	}
-	bool isClear = MapIsAreaClear(map, clearPos, clearSize);
+	bool isClear = MapIsAreaClear(mb, clearPos, clearSize);
 	// Don't let rooms be both edge rooms and overlap rooms
 	// Otherwise dead pockets will be created
 	if (!isClear && !isEdgeRoom)
 	{
 		// If room overlap is enabled, check if it overlaps with a room
 		const bool isOverlap =
-			m->u.Classic.Rooms.Overlap &&
-			MapIsAreaClearOrRoom(map, clearPos, clearSize);
+			mb->mission->u.Classic.Rooms.Overlap &&
+			MapIsAreaClearOrRoom(mb, clearPos, clearSize);
 		// Now check if the overlapping rooms will create a passage
 		// large enough
 		const int roomOverlapSize = MapGetRoomOverlapSize(
-			map, pos, size, overlapAccess);
-		isClear = isOverlap && roomOverlapSize >= m->u.Classic.CorridorWidth;
+			mb, Rect2iNew(pos, size), overlapAccess);
+		isClear =
+			isOverlap &&
+			roomOverlapSize >= mb->mission->u.Classic.CorridorWidth;
 		*isOverlapRoom = true;
 	}
 	return isClear;
 }
 
 static void MapFindAvailableDoors(
-	Map *map, struct vec2i pos, struct vec2i size, int doorMin, int doors[4]);
-
-void MapMakeRoomWalls(Map *map, const RoomParams r);
+	const MapBuilder *mb, const struct vec2i pos, const struct vec2i size,
+	const int doorMin, int doors[4]);
 
 static void MapBuildRoom(
-	Map *map, const struct vec2i pos, const struct vec2i size, const Mission *m,
+	MapBuilder *mb, const struct vec2i pos, const struct vec2i size,
 	const int doorMin, const int doorMax, const bool hasKeys,
-	const bool isOverlapRoom, const unsigned short overlapAccess)
+	const bool isOverlapRoom, const uint16_t overlapAccess)
 {
 	int doormask = rand() % 15 + 1;
 	int doors[4];
 	int doorsUnplaced = 0;
 	int i;
-	unsigned short accessMask = 0;
+	uint16_t accessMask = 0;
 
-	MapMakeRoom(map, pos, size, true);
+	MapMakeRoom(mb, pos, size, true);
 	// Check which walls we can place doors
 	// If we cannot place doors, remember this and try to place them
 	// on other walls
 	// We cannot place doors on: the perimeter, and on overlaps
-	MapFindAvailableDoors(map, pos, size, doorMin, doors);
+	MapFindAvailableDoors(mb, pos, size, doorMin, doors);
 	// Try to place doors according to the random mask
 	// If we cannot place a door, remember this and try to place it
 	// on other doors
@@ -285,7 +283,7 @@ static void MapBuildRoom(
 	}
 
 	// Work out what access level (i.e. key) this room has
-	if (hasKeys && m->u.Classic.Doors.Enabled)
+	if (hasKeys && mb->mission->u.Classic.Doors.Enabled)
 	{
 		// If this room has overlapped another room, use the same
 		// access level as that room
@@ -296,27 +294,29 @@ static void MapBuildRoom(
 		else
 		{
 			// Otherwise, generate an access level for this room
-			accessMask = GenerateAccessMask(&map->keyAccessCount);
-			if (map->keyAccessCount < 1)
+			accessMask = GenerateAccessMask(&mb->Map->keyAccessCount);
+			if (mb->Map->keyAccessCount < 1)
 			{
-				map->keyAccessCount = 1;
+				mb->Map->keyAccessCount = 1;
 			}
 		}
 	}
-	MapPlaceDoors(map, pos, size,
-		m->u.Classic.Doors.Enabled, doors, doorMin, doorMax, accessMask);
+	MapPlaceDoors(
+		mb, pos, size,
+		mb->mission->u.Classic.Doors.Enabled, doors, doorMin, doorMax,
+		accessMask);
 
-	MapMakeRoomWalls(map, m->u.Classic.Rooms);
+	MapMakeRoomWalls(mb, mb->mission->u.Classic.Rooms);
 }
 
-static bool MapTryBuildPillar(Map *map, const Mission *m, const int pad)
+static bool MapTryBuildPillar(MapBuilder *mb, const int pad)
 {
-	int pillarMin = m->u.Classic.Pillars.Min;
-	int pillarMax = m->u.Classic.Pillars.Max;
+	const int pillarMin = mb->mission->u.Classic.Pillars.Min;
+	const int pillarMax = mb->mission->u.Classic.Pillars.Max;
 	struct vec2i size = svec2i(
 		rand() % (pillarMax - pillarMin + 1) + pillarMin,
 		rand() % (pillarMax - pillarMin + 1) + pillarMin);
-	const struct vec2i pos = MapGetRandomTile(map);
+	const struct vec2i pos = MapGetRandomTile(mb->Map);
 	struct vec2i clearPos = svec2i(pos.x - pad, pos.y - pad);
 	struct vec2i clearSize = svec2i(size.x + 2 * pad, size.y + 2 * pad);
 	int isEdge = 0;
@@ -330,10 +330,10 @@ static bool MapTryBuildPillar(Map *map, const Mission *m, const int pad)
 		clearSize.x -= dx;
 		isEdge = 1;
 	}
-	else if (pos.x + size.x == map->Size.x - 2 ||
-		pos.x + size.x == map->Size.x - 1)
+	else if (pos.x + size.x == mb->Map->Size.x - 2 ||
+		pos.x + size.x == mb->Map->Size.x - 1)
 	{
-		clearSize.x = map->Size.x - 1 - pos.x;
+		clearSize.x = mb->Map->Size.x - 1 - pos.x;
 		isEdge = 1;
 	}
 	if (pos.y == 0 || pos.y == 1)
@@ -343,10 +343,10 @@ static bool MapTryBuildPillar(Map *map, const Mission *m, const int pad)
 		clearSize.y -= dy;
 		isEdge = 1;
 	}
-	else if (pos.y + size.y == map->Size.y - 2 ||
-		pos.y + size.y == map->Size.y - 1)
+	else if (pos.y + size.y == mb->Map->Size.y - 2 ||
+		pos.y + size.y == mb->Map->Size.y - 1)
 	{
-		clearSize.y = map->Size.y - 1 - pos.y;
+		clearSize.y = mb->Map->Size.y - 1 - pos.y;
 		isEdge = 1;
 	}
 
@@ -354,28 +354,30 @@ static bool MapTryBuildPillar(Map *map, const Mission *m, const int pad)
 	// or if the pillar only overlaps one of the edge or another
 	// non-room wall
 	// This is to prevent dead pockets
-	isClear = MapIsAreaClear(map, clearPos, clearSize);
-	if (!isClear && !isEdge && MapIsAreaClearOrWall(map, clearPos, clearSize))
+	isClear = MapIsAreaClear(mb, clearPos, clearSize);
+	if (!isClear && !isEdge &&
+		MapIsAreaClearOrWall(mb, clearPos, clearSize))
 	{
 		// Also check that the pillar does not overlap two pillars
-		isClear = MapIsLessThanTwoWallOverlaps(map, clearPos, clearSize);
+		isClear = MapIsLessThanTwoWallOverlaps(mb, clearPos, clearSize);
 	}
 	if (isClear)
 	{
-		MapMakePillar(map, pos, size);
-		return 1;
+		MapMakePillar(mb, pos, size);
+		return true;
 	}
-	return 0;
+	return false;
 }
 
 // Find the maximum door size for a wall
 static int FindWallRun(
-	const Map *map, const struct vec2i mid, const struct vec2i d, const int len);
+	const MapBuilder *mb, const struct vec2i mid, const struct vec2i d,
+	const int len);
 static void MapFindAvailableDoors(
-	Map *map, struct vec2i pos, struct vec2i size, int doorMin, int doors[4])
+	const MapBuilder *mb, const struct vec2i pos, const struct vec2i size,
+	const int doorMin, int doors[4])
 {
-	int i;
-	for (i = 0; i < 4; i++)
+	for (int i = 0; i < 4; i++)
 	{
 		doors[i] = 1;
 	}
@@ -385,7 +387,7 @@ static void MapFindAvailableDoors(
 		doors[0] = 0;
 	}
 	else if (FindWallRun(
-		map,
+		mb,
 		svec2i(pos.x, pos.y + size.y / 2),
 		svec2i(0, 1),
 		size.y - 2) < doorMin)
@@ -393,12 +395,12 @@ static void MapFindAvailableDoors(
 		doors[0] = 0;
 	}
 	// right
-	if (pos.x + size.x >= map->Size.x - 2)
+	if (pos.x + size.x >= mb->Map->Size.x - 2)
 	{
 		doors[1] = 0;
 	}
 	else if (FindWallRun(
-		map,
+		mb,
 		svec2i(pos.x + size.x - 1, pos.y + size.y / 2),
 		svec2i(0, 1),
 		size.y - 2) < doorMin)
@@ -411,7 +413,7 @@ static void MapFindAvailableDoors(
 		doors[2] = 0;
 	}
 	else if (FindWallRun(
-		map,
+		mb,
 		svec2i(pos.x + size.x / 2, pos.y),
 		svec2i(1, 0),
 		size.x - 2) < doorMin)
@@ -419,12 +421,12 @@ static void MapFindAvailableDoors(
 		doors[2] = 0;
 	}
 	// bottom
-	if (pos.y >= map->Size.y - 2)
+	if (pos.y >= mb->Map->Size.y - 2)
 	{
 		doors[3] = 0;
 	}
 	else if (FindWallRun(
-		map,
+		mb,
 		svec2i(pos.x + size.x / 2, pos.y + size.y - 1),
 		svec2i(1, 0),
 		size.x - 2) < doorMin)
@@ -433,7 +435,8 @@ static void MapFindAvailableDoors(
 	}
 }
 static int FindWallRun(
-	const Map *map, const struct vec2i mid, const struct vec2i d, const int len)
+	const MapBuilder *mb, const struct vec2i mid, const struct vec2i d,
+	const int len)
 {
 	int run = 0;
 	int next = 0;
@@ -458,9 +461,9 @@ static int FindWallRun(
 		const struct vec2i v = svec2i_add(mid, svec2i_scale(d, (float)next));
 		plus = !plus;
 
-		if (IMapGet(map, v) != MAP_WALL ||
-			IMapGet(map, svec2i(v.x + d.y, v.y + d.x)) == MAP_WALL ||
-			IMapGet(map, svec2i(v.x - d.y, v.y - d.x)) == MAP_WALL)
+		if (MapBuilderGetTile(mb, v)->Type != TILE_CLASS_WALL ||
+			MapBuilderGetTile(mb, svec2i(v.x + d.y, v.y + d.x))->Type == TILE_CLASS_WALL ||
+			MapBuilderGetTile(mb, svec2i(v.x - d.y, v.y - d.x))->Type == TILE_CLASS_WALL)
 		{
 			break;
 		}

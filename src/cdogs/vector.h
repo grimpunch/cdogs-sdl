@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2013-2014, 2016-2018 Cong Xu
+    Copyright (c) 2013-2014, 2016-2019 Cong Xu
     All rights reserved.
 
     Redistribution and use in source and binary forms, with or without
@@ -33,8 +33,7 @@
 #define CHEBYSHEV_DISTANCE(x1, y1, x2, y2) \
 	MAX(fabsf((x1) - (x2)), fabsf((y1) - (y2)))
 
-struct vec2i svec2i_scale_divide(struct vec2i v, mint_t scale);
-// TODO: due to rounding, this will always return unit component vectors
+struct vec2i svec2i_scale_divide(const struct vec2i v, const mint_t scale);
 
 struct vec2i Vec2iToTile(struct vec2i v);
 struct vec2i Vec2iCenterOfTile(struct vec2i v);
@@ -57,7 +56,9 @@ typedef struct
 		for (_v.y = _r.Pos.y; _v.y < _r.Pos.y + _r.Size.y; _v.y++)\
 		{\
 			for (_v.x = _r.Pos.x; _v.x < _r.Pos.x + _r.Size.x; _v.x++)\
-			{
+			{\
+				const int _i = _v.x + _v.y * _r.Size.x;\
+				UNUSED(_i);
 #define RECT_FOREACH_END() } } }
 
 Rect2i Rect2iNew(const struct vec2i pos, const struct vec2i size);

@@ -38,7 +38,7 @@ typedef struct
 {
 	int UID;
 	const PickupClass *class;
-	TTileItem tileItem;
+	Thing thing;
 	bool IsRandomSpawned;
 	bool isInUse;
 	bool PickedUp;
@@ -52,7 +52,10 @@ void PickupsInit(void);
 void PickupsTerminate(void);
 int PickupsGetNextUID(void);
 void PickupAdd(const NAddPickup ap);
+void PickupAddGun(const WeaponClass *w, const struct vec2 pos);
 void PickupDestroy(const int uid);
+
+void PickupsUpdate(CArray *pickups, const int ticks);
 
 void PickupPickup(TActor *a, Pickup *p, const bool pickupAll);
 // Check if the pickup needs to be picked up manually
